@@ -219,7 +219,7 @@ export default function Home() {
                         </div>
                       </div>
                       <div className="px-4 py-2 bg-black/40 text-[10px] text-center text-slate-500 font-mono border-t border-white/5">
-                        Source: {selectedToken.prediction?.source === 'sna_fast' ? 'Rapid Scan (SNA)' : `Deep Learning (${selectedModel.toUpperCase()})`}
+                        Source: {selectedToken.prediction?.source === 'sna_fast' ? 'Rapid Scan (SNA)' : `Deep Learning (${(selectedToken.prediction?.source || 'AUTO').toUpperCase()})`}
                       </div>
                     </div>
 
