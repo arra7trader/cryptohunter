@@ -1,26 +1,11 @@
-
-# Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.env
-.venv
-env/
+*.pyc
+*.pyo
 venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Node
-node_modules/
-.next/
-out/
-build/
+env/
+.env
 .DS_Store
-coverage/
-.npm/
-
-# IDE
-.vscode/
 .idea/
+.vscode/
+data/
+*.log

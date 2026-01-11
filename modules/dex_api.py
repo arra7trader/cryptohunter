@@ -43,8 +43,8 @@ class DexScreenerAPI:
             time.sleep(self.min_request_interval - elapsed)
         self.last_request_time = time.time()
     
-    def _make_request(self, endpoint: str, params: Optional[Dict] = None, max_retries: int = 3) -> Optional[Dict]:
-        """Helper untuk membuat HTTP request dengan retry dan exponential backoff"""
+    def _make_request(self, endpoint: str, params: Optional[Dict] = None, max_retries: int = 5) -> Optional[Dict]:
+        """Helper untuk membuat HTTP request dengan retry dan exponential backoff yang robust"""
         
         # Check cache first
         cache_key = f"{endpoint}_{str(params)}"
@@ -53,31 +53,37 @@ class DexScreenerAPI:
             if time.time() - cache_time < self.cache_ttl:
                 return cache_data
         
+        # Exponential backoff: 1s, 2s, 4s, 8s, 16s
+        backoff_delay = 1
+        
         for attempt in range(max_retries):
             try:
                 self._rate_limit()  # Rate limiting
                 
                 url = f"{self.BASE_URL}{endpoint}"
-                response = self.session.get(url, params=params, timeout=15)
+                response = self.session.get(url, params=params, timeout=10) # 10s timeout
                 
-                # Handle rate limiting (429)
-                if response.status_code == 429:
-                    wait_time = (2 ** attempt) * 2  # Exponential backoff: 2, 4, 8 seconds
-                    print(f"{Fore.YELLOW}[RATE LIMIT] Waiting {wait_time}s before retry...{Style.RESET_ALL}")
-                    time.sleep(wait_time)
+                if response.status_code == 200:
+                    data = response.json()
+                    # Simpan ke cache
+                    self.cache[cache_key] = (time.time(), data)
+                    return data
+                elif response.status_code == 429:
+                    # Rate limit hit
+                    print(f"{Fore.YELLOW}[WARN] Rate limit hit. Waiting {backoff_delay}s...{Style.RESET_ALL}")
+                    time.sleep(backoff_delay)
+                    backoff_delay *= 2
                     continue
-                
-                response.raise_for_status()
-                data = response.json()
-                
-                # Cache successful response
-                self.cache[cache_key] = (time.time(), data)
-                return data
-                
+                else:
+                    print(f"{Fore.RED}[ERR] API Error {response.status_code}: {url}{Style.RESET_ALL}")
+                    # For other non-200, non-429 errors, we don't retry based on status code, just log and exit
+                    # If we want to retry on other HTTP errors, we'd need to add more logic here.
+                    # For now, it will fall through and return None if not 200 or 429.
+                    return None
+                    
             except requests.exceptions.RequestException as e:
+                # Network error (DNS, Timeout, Connection refused)
                 if attempt < max_retries - 1:
-                    wait_time = (2 ** attempt) * 1
-                    print(f"{Fore.YELLOW}[RETRY] Attempt {attempt + 1}/{max_retries}, waiting {wait_time}s...{Style.RESET_ALL}")
                     time.sleep(wait_time)
                 else:
                     print(f"{Fore.RED}[ERROR] API Request gagal setelah {max_retries} percobaan: {e}{Style.RESET_ALL}")

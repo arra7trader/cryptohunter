@@ -258,11 +258,12 @@ class LiveDashboard:
         
         # Summary stats
         total_volume = pairs_df['volume_1h'].sum()
+        total_mcap = pairs_df['market_cap'].sum()  # NEW: Total Market Cap
         avg_change = pairs_df['price_change_1h'].mean()
         gainers = len(pairs_df[pairs_df['price_change_1h'] > 0])
         losers = len(pairs_df[pairs_df['price_change_1h'] < 0])
         
-        print(f"  📊 Volume 1H: {self.format_number(total_volume)} | Avg Change: {self.format_change(avg_change)} | 📈 Gainers: {gainers} | 📉 Losers: {losers}")
+        print(f"  📊 Vol 1H: {self.format_number(total_volume)} | MCAP: {self.format_number(total_mcap)} | Avg: {self.format_change(avg_change)} | 📈 Gainers: {gainers} | 📉 Losers: {losers}")
     
     def run(self):
         """Run the live dashboard"""
@@ -273,18 +274,24 @@ class LiveDashboard:
         print(f"   Press Ctrl+C to stop{Style.RESET_ALL}\n")
         time.sleep(2)
         
-        try:
-            while self.running:
+        while self.running:
+            try:
                 self.fetch_and_display()
                 
                 # Countdown
                 for remaining in range(self.refresh_interval, 0, -1):
+                    if not self.running: break
                     print(f"\r{Fore.CYAN}  ⏱️  Next refresh in {remaining}s...{Style.RESET_ALL}", end='', flush=True)
                     time.sleep(1)
                     
-        except KeyboardInterrupt:
-            self.running = False
-            print(f"\n\n{Fore.YELLOW}👋 Dashboard stopped.{Style.RESET_ALL}")
+            except KeyboardInterrupt:
+                self.running = False
+                print(f"\n\n{Fore.YELLOW}👋 Dashboard stopped.{Style.RESET_ALL}")
+                break
+            except Exception as e:
+                # Catch connection errors/crashes and retry instead of dying
+                print(f"\n{Fore.RED}[ERR] Connection lost: {e}. Reconnecting in 5s...{Style.RESET_ALL}")
+                time.sleep(5)
     
     def stop(self):
         """Stop the dashboard"""
