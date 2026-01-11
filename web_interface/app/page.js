@@ -65,13 +65,13 @@ export default function Home() {
           <h1 className="text-4xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 flex items-center gap-3 text-glow">
             <Zap className="text-cyan-400 fill-cyan-400 h-8 w-8" />
             CRYPTOHUNTER
-            <span className="text-sm font-light text-slate-500 tracking-[0.2em] border-l border-slate-700 pl-3 ml-1">AI SENTINEL V2.1</span>
+            <span className="text-sm font-light text-slate-300 tracking-[0.2em] border-l border-slate-600 pl-3 ml-1">AI SENTINEL V2.1</span>
           </h1>
           <p className="text-slate-400 text-sm mt-1 ml-11">Advanced DEX Monitoring & Price Prediction Engine</p>
         </div>
         <div className="flex items-center gap-6">
           <div className="text-right hidden md:block">
-            <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-1">System Status</p>
+            <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold mb-1">System Status</p>
             <div className="flex items-center justify-end gap-2 bg-black/30 px-3 py-1 rounded-full border border-emerald-500/20">
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -109,7 +109,7 @@ export default function Home() {
               </Badge>
             </div>
             <TokenTable tokens={tokens} onSelectToken={setSelectedToken} />
-            <p className="text-center text-xs text-slate-600 mt-4">
+            <p className="text-center text-xs text-slate-400 mt-4">
               Auto-refreshing every 10s • Syncing with Python Backend (30s cycle)
             </p>
           </div>
@@ -133,7 +133,7 @@ export default function Home() {
                       <div>
                         <div className="flex items-center gap-2 mb-2">
                           <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/30 hover:bg-blue-500/30">{selectedToken.chain}</Badge>
-                          <span className="text-xs text-slate-500 font-mono">{selectedToken.token_address}</span>
+                          <span className="text-xs text-slate-400 font-mono">{selectedToken.token_address}</span>
                         </div>
                         <CardTitle className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-br from-white to-slate-400">
                           {selectedToken.token}
@@ -169,19 +169,19 @@ export default function Home() {
                     {/* Stats Grid */}
                     <div className="grid grid-cols-2 gap-3 text-sm">
                       <div className="p-3 rounded-lg bg-white/5 border border-white/5 flex flex-col">
-                        <span className="text-slate-500 text-xs text-center mb-1">SNA Score</span>
+                        <span className="text-slate-400 text-xs text-center mb-1">SNA Score</span>
                         <span className="font-mono text-yellow-400 font-bold text-center text-lg">{(selectedToken.sna_score || 0).toFixed(0)}</span>
                       </div>
                       <div className="p-3 rounded-lg bg-white/5 border border-white/5 flex flex-col">
-                        <span className="text-slate-500 text-xs text-center mb-1">Liquidity</span>
+                        <span className="text-slate-400 text-xs text-center mb-1">Liquidity</span>
                         <span className="font-mono text-emerald-400 font-bold text-center text-lg">${((selectedToken.liquidity_usd || 0) / 1000).toFixed(1)}K</span>
                       </div>
                       <div className="p-3 rounded-lg bg-white/5 border border-white/5 flex flex-col">
-                        <span className="text-slate-500 text-xs text-center mb-1">Vol (1H)</span>
+                        <span className="text-slate-400 text-xs text-center mb-1">Vol (1H)</span>
                         <span className="font-mono text-white font-bold text-center text-lg">${((selectedToken.volume_1h || 0) / 1000).toFixed(1)}K</span>
                       </div>
                       <div className="p-3 rounded-lg bg-white/5 border border-white/5 flex flex-col">
-                        <span className="text-slate-500 text-xs text-center mb-1">Market Cap</span>
+                        <span className="text-slate-400 text-xs text-center mb-1">Market Cap</span>
                         <span className="font-mono text-blue-300 font-bold text-center text-lg">${((selectedToken.market_cap || 0) / 1000).toFixed(1)}K</span>
                       </div>
                     </div>
@@ -203,7 +203,7 @@ export default function Home() {
                   </div>
                   <div>
                     <h3 className="text-lg font-bold text-slate-300">Awaiting Target Selection</h3>
-                    <p className="text-sm mt-2 text-slate-500 max-w-[250px] mx-auto leading-relaxed">
+                    <p className="text-sm mt-2 text-slate-400 max-w-[250px] mx-auto leading-relaxed">
                       Select any token from the Live Scanner to initiate Deep AI Analysis and Probability Scoring.
                     </p>
                   </div>

@@ -22,7 +22,7 @@ export default function DashboardHeader({ data }) {
                         <span className="text-sm font-semibold uppercase tracking-wider">Active Scans</span>
                     </div>
                     <div className="text-4xl font-bold text-white text-glow">{active_tokens}</div>
-                    <p className="text-xs text-slate-400">Live Tokens Monitored</p>
+                    <p className="text-xs text-slate-300">Live Tokens Monitored</p>
                 </CardContent>
             </Card>
 
@@ -33,7 +33,7 @@ export default function DashboardHeader({ data }) {
                         <span className="text-sm font-semibold uppercase tracking-wider">Total Volume</span>
                     </div>
                     <div className="text-4xl font-bold text-white">${((total_volume || 0) / 1000000).toFixed(2)}M</div>
-                    <p className="text-xs text-slate-400">Past 1-Hour Aggregated</p>
+                    <p className="text-xs text-slate-300">Past 1-Hour Aggregated</p>
                 </CardContent>
             </Card>
 
@@ -44,7 +44,7 @@ export default function DashboardHeader({ data }) {
                         <span className="text-sm font-semibold uppercase tracking-wider">Gainers</span>
                     </div>
                     <div className="text-4xl font-bold text-emerald-400">+{gainers}</div>
-                    <p className="text-xs text-slate-400">Avg Change: <span className="text-emerald-400">+{Math.abs(avg_change || 0).toFixed(2)}%</span></p>
+                    <p className="text-xs text-slate-300">Avg Change: <span className="text-emerald-400">+{Math.abs(avg_change || 0).toFixed(2)}%</span></p>
                 </CardContent>
             </Card>
 
@@ -55,7 +55,7 @@ export default function DashboardHeader({ data }) {
                         <span className="text-sm font-semibold uppercase tracking-wider">Losers</span>
                     </div>
                     <div className="text-4xl font-bold text-rose-500">-{losers}</div>
-                    <p className="text-xs text-slate-400">Volatile Market Detected</p>
+                    <p className="text-xs text-slate-300">Volatile Market Detected</p>
                 </CardContent>
             </Card>
         </div>

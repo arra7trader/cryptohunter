@@ -9,7 +9,7 @@ import { ArrowUpRight, ArrowDownRight, RefreshCw, Crosshair, ExternalLink } from
 export default function TokenTable({ tokens, onSelectToken }) {
     if (!tokens || !Array.isArray(tokens) || tokens.length === 0) {
         return (
-            <div className="flex flex-col items-center justify-center h-64 text-muted-foreground p-8 border rounded-lg border-dashed border-slate-700 bg-slate-900/50">
+            <div className="flex flex-col items-center justify-center h-64 text-slate-400 p-8 border rounded-lg border-dashed border-slate-700 bg-slate-900/50">
                 <RefreshCw className="h-8 w-8 mb-4 animate-spin" />
                 <p>Scanning DexScreener...</p>
             </div>
@@ -62,7 +62,7 @@ export default function TokenTable({ tokens, onSelectToken }) {
                                             {token.chain}
                                         </Badge>
                                     </div>
-                                    <div className="text-xs text-slate-500 font-mono mt-1 opacity-50 group-hover:opacity-100 transition-opacity">
+                                    <div className="text-xs text-slate-400 font-mono mt-1 opacity-50 group-hover:opacity-100 transition-opacity">
                                         {token.token_address.substring(0, 6)}...{token.token_address.substring(token.token_address.length - 4)}
                                     </div>
                                 </td>
