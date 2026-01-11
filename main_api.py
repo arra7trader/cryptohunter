@@ -95,7 +95,7 @@ def update_market_cache():
         data_cache.is_updating = True
         print("[API] Updating market cache...")
         
-        # Fetch tokens
+        # 1. Fetch tokens (Now optimized via ThreadPool)
         pairs_df = dex_api.search_new_pairs(min_liquidity=5000)
         
         if pairs_df.empty:
@@ -103,14 +103,12 @@ def update_market_cache():
             data_cache.is_updating = False
             return
 
-        # Sort by volume
-        pairs_df = pairs_df.sort_values('volume_1h', ascending=False).head(30)
+        # Sort by volume and take top 50 (Display ALL first)
+        pairs_df = pairs_df.sort_values('volume_1h', ascending=False).head(50)
         
-        new_data = []
-        
-        # Process each token (SNA + Light Analysis)
-        # We don't run full LSTM for list view to keep it fast, only on detail view or specific request
-        sna_results = sna_analyzer.analyze_batch(pairs_df)
+        # === STAGE 1: RAW DATA (IMMEDIATE DISPLAY) ===
+        # We prepare the list with "SCANNING..." status first so user sees the tokens
+        raw_data = []
         
         def safe_float(val):
             try:
@@ -119,67 +117,95 @@ def update_market_cache():
                 return 0.0
 
         for idx, row in pairs_df.iterrows():
-            token_symbol = row['base_token']
-            
-            # Match SNA result
-            sna_score = 0
-            for r in sna_results:
-                if r.token_symbol == token_symbol:
-                    sna_score = r.sna_score
-                    break
-            
-            # Simple Status
+            token_symbol = str(row['base_token'])
             c5m = safe_float(row['price_change_5m'])
+            
+            # Basic Status based on price only
             status = "NEUTRAL"
             if c5m <= -10: status = "CRASH"
             elif c5m <= -5: status = "DUMP"
             elif c5m > 5: status = "PUMP"
-            
-            # Basic Prediction (Fast)
-            # Full LSTM is triggered on demand
-            vol = safe_float(row['volume_1h'])
-            liq = safe_float(row['liquidity_usd'])
-            conf = 50 + (sna_score * 0.3)
-            if vol / max(1, liq) > 2:
-                conf += 10
-            conf = int(min(95, max(40, conf)))
-            
+
             token_data = {
-                "token": str(token_symbol),
+                "token": token_symbol,
                 "chain": str(row['chain_id']).upper(),
                 "token_address": str(row['base_token_address']),
                 "price_usd": safe_float(row['price_usd']),
                 "price_change_5m": c5m,
                 "price_change_1h": safe_float(row['price_change_1h']),
-                "volume_1h": vol,
-                "liquidity_usd": liq,
+                "volume_1h": safe_float(row['volume_1h']),
+                "liquidity_usd": safe_float(row['liquidity_usd']),
                 "market_cap": safe_float(row['market_cap']),
-                "sna_score": float(sna_score),
+                "sna_score": 50.0, # Placeholder
                 "prediction": {
-                    "confidence": conf,
-                    "pump_in_hours": 2 if sna_score > 50 else 6,
-                    "source": "sna_fast"
+                    "confidence": 0,
+                    "pump_in_hours": 0,
+                    "source": "scanning..." # Indicator for UI
                 },
-                "status": status
+                "status": "SCANNING"
+            }
+            raw_data.append(token_data)
+        
+        # Update Cache IMMEDIATELY with Raw Data
+        with cache_lock:
+            data_cache.market_data = raw_data
+            data_cache.last_update = time.time()
+        print(f"[API] Stage 1: Displaying {len(raw_data)} tokens (Raw)")
+
+
+        # === STAGE 2: ENRICHMENT (SNA + ANALYSIS) ===
+        # Now we process SNA and Logic in the background
+        
+        sna_results = sna_analyzer.analyze_batch(pairs_df)
+        enriched_data = []
+
+        for item in raw_data:
+            token_symbol = item['token']
+            
+            # Find SNA result
+            sna_score = 50
+            for r in sna_results:
+                if r.token_symbol == token_symbol:
+                    sna_score = r.sna_score
+                    break
+            
+            item['sna_score'] = float(sna_score)
+            
+            # Update AI/Heuristic Prediction
+            vol = item['volume_1h']
+            liq = item['liquidity_usd']
+            conf = 50 + (sna_score * 0.3)
+            
+            # Simple Heuristic
+            if vol / max(1, liq) > 2:
+                conf += 10
+            
+            final_conf = int(min(95, max(40, conf)))
+            
+            item['prediction'] = {
+                "confidence": final_conf,
+                "pump_in_hours": 2 if sna_score > 60 else 6,
+                "source": "sna_fast"
             }
             
-            # Save to Turso DB (Async/Fire-and-forget ideally, but sync here for simplicity)
-            if conf > 60:  # Only save interesting predictions
-                try:
-                    db.save_prediction(token_data)
-                except:
-                    pass
-                    
-            new_data.append(token_data)
+            # Final Status Update
+            if item['price_change_5m'] > 5: item['status'] = "PUMP"
+            elif item['price_change_5m'] < -5: item['status'] = "DUMP"
+            else: item['status'] = "NEUTRAL"
             
+            enriched_data.append(item)
+
+        # Update Cache AGAIN with Enriched Data
         with cache_lock:
-            data_cache.market_data = new_data
+            data_cache.market_data = enriched_data
             data_cache.last_update = time.time()
             
-        print(f"[API] Cache updated with {len(new_data)} tokens")
+        print(f"[API] Stage 2: Enriched {len(enriched_data)} tokens with SNA")
         
     except Exception as e:
         print(f"[API] Error updating cache: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         data_cache.is_updating = False
 

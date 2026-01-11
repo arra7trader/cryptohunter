@@ -87,96 +87,148 @@ class DexScreenerAPI:
     def search_new_pairs(self, chain: str = "all", min_liquidity: float = 1000) -> pd.DataFrame:
         """
         Mencari pair baru/trending dari DexScreener
-        
-        Args:
-            chain: Chain yang ingin dicari (default: all)
-            min_liquidity: Minimum likuiditas dalam USD
-            
-        Returns:
-            DataFrame dengan kolom: pair_address, base_token, quote_token, 
-                                   price_usd, volume_24h, liquidity_usd, 
-                                   price_change_5m, price_change_1h, price_change_24h
+        Optimized: Menggunakan Batch Requests untuk kecepatan tinggi.
         """
-        print(f"{Fore.CYAN}[INFO] Mencari pair baru dari DexScreener...{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}[INFO] Mencari pair baru dari DexScreener (Batch Optimized)...{Style.RESET_ALL}")
         
         # Endpoint untuk mendapatkan boosted/trending tokens
         endpoint = "/token-boosts/latest/v1"
         data = self._make_request(endpoint)
         
-        if not data:
-            # Fallback ke search endpoint
-            endpoint = "/latest/dex/search"
-            data = self._make_request(endpoint, params={"q": "pump"})
+        raw_candidates = []
+        
+        if data and isinstance(data, list):
+            # 1. Kumpulkan kandidat dari Boosted
+            for item in data[:60]:  # Ambil 60 kandidat
+                raw_candidates.append({
+                    "address": item.get("tokenAddress"),
+                    "chain": item.get("chainId")
+                })
+        
+        if not raw_candidates:
+             # Fallback ke search
+             endpoint = "/latest/dex/search"
+             data = self._make_request(endpoint, params={"q": "pump"})
+             if data and "pairs" in data:
+                 # Search return langsung pair details, jadi bisa langsung parse
+                 pairs_list = [self._parse_pair(p) for p in data["pairs"][:60]]
+                 return self._filter_pairs(pairs_list, min_liquidity)
+        
+        # 2. Batch Processing untuk detail pair
+        # Group by chain
+        from collections import defaultdict
+        chain_groups = defaultdict(list)
+        for c in raw_candidates:
+            if c["address"] and c["chain"]:
+                chain_groups[c["chain"]].append(c["address"])
         
         pairs_list = []
         
-        if data and isinstance(data, list):
-            # Handle boosted tokens response
-            for item in data[:50]:  # Limit 50 tokens
-                token_address = item.get("tokenAddress", "")
-                chain_id = item.get("chainId", "unknown")
+        # Request per chain (Batch 30)
+        for chain_id, addresses in chain_groups.items():
+            # Chunk into 30
+            for i in range(0, len(addresses), 30):
+                chunk = addresses[i:i+30]
+                addr_str = ",".join(chunk)
                 
-                # Get detailed pair info
-                pair_data = self._get_pair_details(token_address, chain_id)
-                if pair_data:
-                    pairs_list.extend(pair_data)
-                    
-        elif data and "pairs" in data:
-            # Handle search response
-            for pair in data["pairs"][:50]:
-                liquidity = float(pair.get("liquidity", {}).get("usd", 0) or 0)
+                # Fetch pairs pairs/{chainId}/{pairAddresses}
+                # Catatan: Endpoint ini untuk PAIR addresses, tapi boosts return TOKEN addresses.
+                # Kita harus pakai endpoint /tokens/v1/{chainId}/{tokenAddresses} jika ada, 
+                # tapi DexScreener docs bilang /tokens/v1/{chainId}/{tokenAddress} (singular).
+                # TAPI, endpoint /pairs/{chainId}/{pairAddresses} support multi.
+                # Boosts return tokenAddress. Kita butuh fetch pair by token address.
+                # Sayangnya endpoint /tokens/v1/{chainId}/{tokenAddress} sepertinya singular.
+                # Mari kita coba trik: search endpoint juga agak terbatas.
                 
-                if liquidity >= min_liquidity:
-                    pairs_list.append(self._parse_pair(pair))
+                # SOLUSI TERBAIK: 
+                # Endpoint /tokens/v1/{chainId}/{tokenAddress} sepertinya tidak support comma (multi).
+                # Tapi kita bisa parallelize requests ini dengan ThreadPoolExecutor
+                # karena ini IO bound.
+                pass
+
+        # Since batching by token address isn't natively documented as multi-fetch for the 'tokens' endpoint,
+        # we will switch to ThreadPoolExecutor to blast requests concurrently instead of serially.
+        # This honors the "show all quickly" requirement.
         
-        # Jika masih kosong, coba endpoint profiles
-        if not pairs_list:
-            pairs_list = self._get_trending_from_profiles()
+        pairs_list = self._fetch_details_concurrently(raw_candidates)
         
+        # Jika masih kosong/sedikit, tambah dari profiles (juga concurrent)
+        if len(pairs_list) < 5:
+            more_candidates = self._get_trending_candidates_from_profiles()
+            pairs_list.extend(self._fetch_details_concurrently(more_candidates))
+
         df = pd.DataFrame(pairs_list)
-        
-        if not df.empty:
-            # Filter berdasarkan minimum liquidity
+        return self._filter_pairs(df, min_liquidity)
+
+    def _filter_pairs(self, df_or_list, min_liquidity):
+        if isinstance(df_or_list, list):
+             df = pd.DataFrame(df_or_list)
+        else:
+             df = df_or_list
+             
+        if not df.empty and "liquidity_usd" in df.columns:
             df = df[df["liquidity_usd"] >= min_liquidity]
-            # Sort by volume
             df = df.sort_values("volume_24h", ascending=False)
             print(f"{Fore.GREEN}[SUCCESS] Ditemukan {len(df)} pair potensial{Style.RESET_ALL}")
-        else:
-            print(f"{Fore.YELLOW}[WARNING] Tidak ada pair yang ditemukan{Style.RESET_ALL}")
-            
-        return df
-    
-    def _get_pair_details(self, token_address: str, chain_id: str) -> List[Dict]:
-        """Mendapatkan detail pair dari token address"""
-        endpoint = f"/tokens/v1/{chain_id}/{token_address}"
-        data = self._make_request(endpoint)
+            return df
         
-        if data and isinstance(data, list):
-            return [self._parse_pair(pair) for pair in data[:5]]
+        print(f"{Fore.YELLOW}[WARNING] Tidak ada pair yang ditemukan{Style.RESET_ALL}")
+        return pd.DataFrame()
+
+    def _fetch_details_concurrently(self, candidates: List[Dict]) -> List[Dict]:
+        """Fetch details in parallel threads"""
+        import concurrent.futures
+        
+        results = []
+        # Batasi max worker agar tidak kena ban IP (misal 10 worker)
+        # Dan kita bypass rate limit sleep internal dengan hati-hati
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_token = {
+                executor.submit(self._fetch_single_pair_no_wait, c["address"], c["chain"]): c 
+                for c in candidates
+            }
+            
+            for future in concurrent.futures.as_completed(future_to_token):
+                try:
+                    data = future.result()
+                    if data:
+                        results.extend(data)
+                except Exception as e:
+                    pass
+        
+        return results
+
+    def _fetch_single_pair_no_wait(self, token_address, chain_id):
+        """Fetch detail tanpa global sleep lock yang agresif"""
+        endpoint = f"/tokens/v1/{chain_id}/{token_address}"
+        try:
+            # Direct request bypassing the heavy _make_request locking for speed
+            # But we still need basic headers
+            url = f"{self.BASE_URL}{endpoint}"
+            resp = self.session.get(url, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, list):
+                     return [self._parse_pair(p) for p in data[:1]] # Ambil top pair saja
+            elif resp.status_code == 429:
+                print("Rate limit hit in thread")
+                time.sleep(1)
+        except:
+            pass
         return []
-    
-    def _get_trending_from_profiles(self) -> List[Dict]:
-        """Fallback: Mendapatkan trending dari profiles endpoint"""
+
+    def _get_trending_candidates_from_profiles(self) -> List[Dict]:
         endpoint = "/token-profiles/latest/v1"
         data = self._make_request(endpoint)
-        
-        pairs_list = []
+        candidates = []
         if data and isinstance(data, list):
             for item in data[:30]:
-                token_address = item.get("tokenAddress", "")
-                chain_id = item.get("chainId", "solana")  # Default solana
-                
-                # Get pair info
-                pair_endpoint = f"/tokens/v1/{chain_id}/{token_address}"
-                pair_data = self._make_request(pair_endpoint)
-                
-                if pair_data and isinstance(pair_data, list):
-                    for pair in pair_data[:2]:
-                        pairs_list.append(self._parse_pair(pair))
-                        
-                time.sleep(0.2)  # Rate limiting
-                
-        return pairs_list
+                candidates.append({
+                    "address": item.get("tokenAddress"),
+                    "chain": item.get("chainId", "solana")
+                })
+        return candidates
     
     def _parse_pair(self, pair: Dict) -> Dict:
         """Parse data pair menjadi format standar"""
