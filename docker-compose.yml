@@ -16,7 +16,7 @@ services:
       dockerfile: Dockerfile
     container_name: cryptohunter-frontend
     ports:
-      - "3000:3000"
+      - "3005:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
     depends_on:
