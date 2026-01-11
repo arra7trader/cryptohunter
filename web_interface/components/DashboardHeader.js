@@ -14,48 +14,48 @@ export default function DashboardHeader({ data }) {
     };
 
     return (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <Card className="bg-gradient-to-br from-slate-900 to-slate-800 border-slate-700">
-                <CardContent className="p-6 flex flex-col items-center justify-center space-y-2">
-                    <div className="flex items-center space-x-2 text-slate-400">
-                        <Activity className="h-4 w-4" />
-                        <span className="text-sm font-medium">Active Scans</span>
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+            <Card className="glass-card border-l-4 border-l-cyan-500 hover:border-l-cyan-400 transition-all duration-300">
+                <CardContent className="p-6 flex flex-col items-start space-y-3">
+                    <div className="flex items-center space-x-2 text-cyan-400">
+                        <Activity className="h-5 w-5" />
+                        <span className="text-sm font-semibold uppercase tracking-wider">Active Scans</span>
                     </div>
-                    <div className="text-3xl font-bold">{active_tokens}</div>
-                    <p className="text-xs text-slate-500">Live Tokens Monitored</p>
+                    <div className="text-4xl font-bold text-white text-glow">{active_tokens}</div>
+                    <p className="text-xs text-slate-400">Live Tokens Monitored</p>
                 </CardContent>
             </Card>
 
-            <Card className="bg-gradient-to-br from-slate-900 to-slate-800 border-slate-700">
-                <CardContent className="p-6 flex flex-col items-center justify-center space-y-2">
-                    <div className="flex items-center space-x-2 text-slate-400">
-                        <BarChart3 className="h-4 w-4" />
-                        <span className="text-sm font-medium">Total Volume (1H)</span>
+            <Card className="glass-card border-l-4 border-l-violet-500 hover:border-l-violet-400 transition-all duration-300">
+                <CardContent className="p-6 flex flex-col items-start space-y-3">
+                    <div className="flex items-center space-x-2 text-violet-400">
+                        <BarChart3 className="h-5 w-5" />
+                        <span className="text-sm font-semibold uppercase tracking-wider">Total Volume</span>
                     </div>
-                    <div className="text-3xl font-bold">${((total_volume || 0) / 1000000).toFixed(2)}M</div>
-                    <p className="text-xs text-slate-500">Across all providers</p>
+                    <div className="text-4xl font-bold text-white">${((total_volume || 0) / 1000000).toFixed(2)}M</div>
+                    <p className="text-xs text-slate-400">Past 1-Hour Aggregated</p>
                 </CardContent>
             </Card>
 
-            <Card className="bg-gradient-to-br from-slate-900 to-slate-800 border-slate-700">
-                <CardContent className="p-6 flex flex-col items-center justify-center space-y-2">
-                    <div className="flex items-center space-x-2 text-slate-400">
-                        <TrendingUp className="h-4 w-4 text-green-500" />
-                        <span className="text-sm font-medium">Gainers</span>
+            <Card className="glass-card border-l-4 border-l-emerald-500 hover:border-l-emerald-400 transition-all duration-300">
+                <CardContent className="p-6 flex flex-col items-start space-y-3">
+                    <div className="flex items-center space-x-2 text-emerald-400">
+                        <TrendingUp className="h-5 w-5" />
+                        <span className="text-sm font-semibold uppercase tracking-wider">Gainers</span>
                     </div>
-                    <div className="text-3xl font-bold text-green-500">{gainers}</div>
-                    <p className="text-xs text-slate-500">Avg Change: {avg_change > 0 ? "+" : ""}{(avg_change || 0).toFixed(2)}%</p>
+                    <div className="text-4xl font-bold text-emerald-400">+{gainers}</div>
+                    <p className="text-xs text-slate-400">Avg Change: <span className="text-emerald-400">+{Math.abs(avg_change || 0).toFixed(2)}%</span></p>
                 </CardContent>
             </Card>
 
-            <Card className="bg-gradient-to-br from-slate-900 to-slate-800 border-slate-700">
-                <CardContent className="p-6 flex flex-col items-center justify-center space-y-2">
-                    <div className="flex items-center space-x-2 text-slate-400">
-                        <TrendingDown className="h-4 w-4 text-red-500" />
-                        <span className="text-sm font-medium">Losers</span>
+            <Card className="glass-card border-l-4 border-l-rose-500 hover:border-l-rose-400 transition-all duration-300">
+                <CardContent className="p-6 flex flex-col items-start space-y-3">
+                    <div className="flex items-center space-x-2 text-rose-400">
+                        <TrendingDown className="h-5 w-5" />
+                        <span className="text-sm font-semibold uppercase tracking-wider">Losers</span>
                     </div>
-                    <div className="text-3xl font-bold text-red-500">{losers}</div>
-                    <p className="text-xs text-slate-500">Volatile Market</p>
+                    <div className="text-4xl font-bold text-rose-500">-{losers}</div>
+                    <p className="text-xs text-slate-400">Volatile Market Detected</p>
                 </CardContent>
             </Card>
         </div>

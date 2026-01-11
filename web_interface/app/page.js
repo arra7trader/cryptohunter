@@ -54,132 +54,163 @@ export default function Home() {
   </Badge>
 
   return (
-    <main className="min-h-screen p-6 space-y-8 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black">
+    <main className="min-h-screen p-6 space-y-8 relative overflow-hidden">
+      {/* Background Decor */}
+      <div className="fixed inset-0 z-[-1] bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-slate-900 via-[#0a0f1d] to-black"></div>
+      <div className="fixed top-0 left-0 w-full h-[500px] bg-gradient-to-b from-cyan-900/10 to-transparent pointer-events-none"></div>
+
       {/* Navbar */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between container mx-auto pt-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400 flex items-center gap-2">
-            <Zap className="text-blue-400 fill-blue-400 h-6 w-6" />
-            CRYPTOHUNTER <span className="text-slate-600 font-light hidden sm:inline">| AI SENTINEL</span>
+          <h1 className="text-4xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 flex items-center gap-3 text-glow">
+            <Zap className="text-cyan-400 fill-cyan-400 h-8 w-8" />
+            CRYPTOHUNTER
+            <span className="text-sm font-light text-slate-500 tracking-[0.2em] border-l border-slate-700 pl-3 ml-1">AI SENTINEL V2.1</span>
           </h1>
-          <p className="text-slate-500 text-sm mt-1">Real-time DEX Monitoring & AI Prediction System</p>
+          <p className="text-slate-400 text-sm mt-1 ml-11">Advanced DEX Monitoring & Price Prediction Engine</p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-6">
           <div className="text-right hidden md:block">
-            <p className="text-xs text-slate-500 uppercase tracking-widest font-semibold">System Status</p>
-            <div className="flex items-center justify-end gap-2">
+            <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-1">System Status</p>
+            <div className="flex items-center justify-end gap-2 bg-black/30 px-3 py-1 rounded-full border border-emerald-500/20">
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
-              <span className="text-xs font-mono text-emerald-400">ONLINE</span>
+              <span className="text-xs font-mono text-emerald-400 font-bold tracking-wider">SYSTEM ONLINE</span>
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={fetchData} disabled={loading} className="gap-2 border-slate-700 hover:bg-slate-800">
+          <Button variant="outline" size="sm" onClick={fetchData} disabled={loading} className="gap-2 border-slate-700 hover:bg-cyan-500/10 hover:text-cyan-400 hover:border-cyan-500/50 transition-all">
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
+            Sync Data
           </Button>
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <DashboardHeader data={summary} />
+      <div className="container mx-auto space-y-8">
+        {/* Summary Cards */}
+        <DashboardHeader data={summary} />
 
-      {/* Main Content Split */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Main Content Split */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
-        {/* Left: Token List */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold flex items-center gap-2">
-              <div className="h-2 w-2 rounded-full bg-blue-500"></div>
-              Live Scanner
-            </h2>
-            <Badge variant="secondary" className="bg-slate-800 text-slate-400">
-              Updated: {lastUpdate ? lastUpdate.toLocaleTimeString() : '...'}
-            </Badge>
+          {/* Left: Token List */}
+          <div className="lg:col-span-2 space-y-5">
+            <div className="flex items-center justify-between px-2">
+              <h2 className="text-lg font-semibold flex items-center gap-3 text-white">
+                <span className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
+                </span>
+                Live Market Scanner
+              </h2>
+              <Badge variant="secondary" className="bg-slate-900 border border-slate-800 text-slate-400 font-mono">
+                Last Sync: <span className="text-cyan-400 ml-2">{lastUpdate ? lastUpdate.toLocaleTimeString() : '--:--:--'}</span>
+              </Badge>
+            </div>
+            <TokenTable tokens={tokens} onSelectToken={setSelectedToken} />
+            <p className="text-center text-xs text-slate-600 mt-4">
+              Auto-refreshing every 10s • Syncing with Python Backend (30s cycle)
+            </p>
           </div>
-          <TokenTable tokens={tokens} onSelectToken={setSelectedToken} />
-        </div>
 
-        {/* Right: AI Analysis Panel */}
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-purple-500"></div>
-            Sentinel AI Analysis
-          </h2>
+          {/* Right: AI Analysis Panel */}
+          <div className="space-y-5">
+            <h2 className="text-lg font-semibold flex items-center gap-2 text-white px-2">
+              <Zap className="h-5 w-5 text-purple-500" />
+              Sentinel AI Analysis
+            </h2>
 
-          <Card className="min-h-[400px] border-slate-800 bg-slate-900/50 backdrop-blur-sm">
-            {selectedToken ? (
-              <>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle className="text-2xl text-blue-400">{selectedToken.token}</CardTitle>
-                      <CardDescription className="font-mono text-xs mt-1">{selectedToken.token_address}</CardDescription>
-                    </div>
-                    <Badge variant="outline" className="text-xs border-purple-500/50 text-purple-400">
-                      AI CONFIDENCE: {selectedToken.prediction?.confidence}%
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  {/* AI Prediction Block */}
-                  <div className="bg-slate-950/80 rounded-lg p-4 border border-slate-800">
-                    <div className="grid grid-cols-2 gap-4">
+            <Card className="min-h-[500px] border-0 glass-card relative overflow-hidden group">
+              {/* Decorative background elements for the card */}
+              <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500/10 blur-[50px] rounded-full pointer-events-none"></div>
+              <div className="absolute bottom-0 left-0 w-32 h-32 bg-blue-500/10 blur-[50px] rounded-full pointer-events-none"></div>
+
+              {selectedToken ? (
+                <>
+                  <CardHeader className="relative z-10 border-b border-white/5 pb-6">
+                    <div className="flex items-start justify-between">
                       <div>
-                        <p className="text-xs text-slate-500 uppercase tracking-wider">Pump Prob.</p>
-                        <div className="text-xl font-bold text-emerald-400">
-                          {selectedToken.prediction?.confidence > 70 ? 'HIGH' : 'MODERATE'}
+                        <div className="flex items-center gap-2 mb-2">
+                          <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/30 hover:bg-blue-500/30">{selectedToken.chain}</Badge>
+                          <span className="text-xs text-slate-500 font-mono">{selectedToken.token_address}</span>
                         </div>
+                        <CardTitle className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-br from-white to-slate-400">
+                          {selectedToken.token}
+                        </CardTitle>
                       </div>
-                      <div>
-                        <p className="text-xs text-slate-500 uppercase tracking-wider">Target Time</p>
-                        <div className="text-xl font-bold text-white">
-                          ~{selectedToken.prediction?.pump_in_hours} Hours
+                      <div className="flex flex-col items-end">
+                        <div className="text-xs text-purple-400 font-bold uppercase tracking-wider mb-1">AI Confidence</div>
+                        <div className="text-3xl font-bold text-white shadow-purple-500/50 drop-shadow-lg">
+                          {selectedToken.prediction?.confidence}%
                         </div>
                       </div>
                     </div>
-                  </div>
+                  </CardHeader>
+                  <CardContent className="space-y-6 pt-6 relative z-10">
+                    {/* AI Prediction Block */}
+                    <div className="bg-gradient-to-r from-slate-900 to-black rounded-xl p-1 border border-white/10 shadow-inner">
+                      <div className="bg-white/5 rounded-lg p-5 grid grid-cols-2 gap-4">
+                        <div className="text-center border-r border-white/10">
+                          <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Pump Probability</p>
+                          <div className={`text-2xl font-bold ${selectedToken.prediction?.confidence > 70 ? 'text-emerald-400' : 'text-yellow-400'}`}>
+                            {selectedToken.prediction?.confidence > 70 ? 'VERY HIGH' : 'MODERATE'}
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Est. Timeframe</p>
+                          <div className="text-2xl font-bold text-cyan-300">
+                            &lt; {selectedToken.prediction?.pump_in_hours} Hours
+                          </div>
+                        </div>
+                      </div>
+                    </div>
 
-                  {/* Stats Grid */}
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div className="flex justify-between border-b border-slate-800 pb-2">
-                      <span className="text-slate-500">SNA Score</span>
-                      <span className="font-mono text-yellow-400">{(selectedToken.sna_score || 0).toFixed(0)}/100</span>
+                    {/* Stats Grid */}
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div className="p-3 rounded-lg bg-white/5 border border-white/5 flex flex-col">
+                        <span className="text-slate-500 text-xs text-center mb-1">SNA Score</span>
+                        <span className="font-mono text-yellow-400 font-bold text-center text-lg">{(selectedToken.sna_score || 0).toFixed(0)}</span>
+                      </div>
+                      <div className="p-3 rounded-lg bg-white/5 border border-white/5 flex flex-col">
+                        <span className="text-slate-500 text-xs text-center mb-1">Liquidity</span>
+                        <span className="font-mono text-emerald-400 font-bold text-center text-lg">${((selectedToken.liquidity_usd || 0) / 1000).toFixed(1)}K</span>
+                      </div>
+                      <div className="p-3 rounded-lg bg-white/5 border border-white/5 flex flex-col">
+                        <span className="text-slate-500 text-xs text-center mb-1">Vol (1H)</span>
+                        <span className="font-mono text-white font-bold text-center text-lg">${((selectedToken.volume_1h || 0) / 1000).toFixed(1)}K</span>
+                      </div>
+                      <div className="p-3 rounded-lg bg-white/5 border border-white/5 flex flex-col">
+                        <span className="text-slate-500 text-xs text-center mb-1">Market Cap</span>
+                        <span className="font-mono text-blue-300 font-bold text-center text-lg">${((selectedToken.market_cap || 0) / 1000).toFixed(1)}K</span>
+                      </div>
                     </div>
-                    <div className="flex justify-between border-b border-slate-800 pb-2">
-                      <span className="text-slate-500">Liquidity</span>
-                      <span className="font-mono">${((selectedToken.liquidity_usd || 0) / 1000).toFixed(1)}K</span>
-                    </div>
-                    <div className="flex justify-between border-b border-slate-800 pb-2">
-                      <span className="text-slate-500">Volume 1H</span>
-                      <span className="font-mono">${((selectedToken.volume_1h || 0) / 1000).toFixed(1)}K</span>
-                    </div>
-                    <div className="flex justify-between border-b border-slate-800 pb-2">
-                      <span className="text-slate-500">Chain</span>
-                      <span className="font-mono uppercase text-blue-300">{selectedToken.chain}</span>
-                    </div>
-                  </div>
 
-                  <Button
-                    className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold shadow-lg shadow-purple-900/20"
-                    onClick={() => window.open(`https://dexscreener.com/${selectedToken.chain.toLowerCase()}/${selectedToken.token_address}`, '_blank')}
-                  >
-                    View on DexScreener
-                  </Button>
-                </CardContent>
-              </>
-            ) : (
-              <div className="h-full flex flex-col items-center justify-center p-8 text-center text-slate-500 space-y-4">
-                <Crosshair className="h-16 w-16 text-slate-700" />
-                <div>
-                  <p className="font-medium text-slate-400">No Token Selected</p>
-                  <p className="text-sm mt-1">Select a token from the Live Scanner list to view deep AI analysis and details.</p>
+                    <Button
+                      className="w-full h-12 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold tracking-wider rounded-xl shadow-lg shadow-cyan-900/40 border border-white/10 transition-all hover:scale-[1.02]"
+                      onClick={() => window.open(`https://dexscreener.com/${selectedToken.chain.toLowerCase()}/${selectedToken.token_address}`, '_blank')}
+                    >
+                      <Crosshair className="mr-2 h-5 w-5" />
+                      ANALYZE ON DEXSCREENER
+                    </Button>
+                  </CardContent>
+                </>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center p-8 text-center text-slate-500 space-y-6 min-h-[400px]">
+                  <div className="relative">
+                    <div className="absolute inset-0 bg-cyan-500/20 blur-xl rounded-full"></div>
+                    <Crosshair className="h-20 w-20 text-slate-600 relative z-10" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-300">Awaiting Target Selection</h3>
+                    <p className="text-sm mt-2 text-slate-500 max-w-[250px] mx-auto leading-relaxed">
+                      Select any token from the Live Scanner to initiate Deep AI Analysis and Probability Scoring.
+                    </p>
+                  </div>
                 </div>
-              </div>
-            )}
-          </Card>
+              )}
+            </Card>
+          </div>
         </div>
       </div>
     </main>
