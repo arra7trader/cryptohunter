@@ -17,7 +17,28 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(null); // Fix hydration mismatch
 
-  // ... (fetchData logic same) ...
+  // Fetch data
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const [tokensRes, summaryRes] = await Promise.all([
+        fetch(`${API_BASE}/api/tokens`),
+        fetch(`${API_BASE}/api/market/summary`)
+      ]);
+
+      if (tokensRes.ok && summaryRes.ok) {
+        const tokensData = await tokensRes.json();
+        const summaryData = await summaryRes.json();
+        setTokens(tokensData);
+        setSummary(summaryData);
+        setLastUpdate(new Date());
+      }
+    } catch (error) {
+      console.error("Failed to fetch data:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     setLastUpdate(new Date()); // Set initial date on client
