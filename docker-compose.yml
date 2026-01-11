@@ -1,29 +1,25 @@
 version: '3.8'
 
 services:
-  # Service untuk bot scanner & predictor (sekali jalan)
-  cryptohunter-bot:
+  backend:
     build: .
-    container_name: cryptohunter-bot
-    image: cryptohunter:latest
+    container_name: cryptohunter-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
     volumes:
       - .:/app
-    command: python main_bot.py
-    stdin_open: true # For interactive input if needed
-    tty: true
+    command: uvicorn main_api:app --host 0.0.0.0 --port 8000 --reload
 
-  # Service untuk live dashboard (terus berjalan)
-  cryptohunter-dashboard:
-    build: .
-    container_name: cryptohunter-dashboard
-    image: cryptohunter:latest
-    volumes:
-      - .:/app
-    command: python live_dashboard.py
-    stdin_open: true
-    tty: true
-    deploy:
-      resources:
-        limits:
-          cpus: '0.50'
-          memory: 512M
+  frontend:
+    build:
+      context: ./web_interface
+      dockerfile: Dockerfile
+    container_name: cryptohunter-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8000
+    depends_on:
+      - backend
