@@ -16,6 +16,7 @@ export default function Home() {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(null); // Fix hydration mismatch
+  const [selectedToken, setSelectedToken] = useState(null);
 
   // Fetch data
   const fetchData = async () => {
