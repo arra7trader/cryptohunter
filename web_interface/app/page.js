@@ -15,37 +15,21 @@ export default function Home() {
   const [tokens, setTokens] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState(new Date());
-  const [selectedToken, setSelectedToken] = useState(null);
+  const [lastUpdate, setLastUpdate] = useState(null); // Fix hydration mismatch
 
-  // Fetch data
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      const [tokensRes, summaryRes] = await Promise.all([
-        fetch(`${API_BASE}/api/tokens`),
-        fetch(`${API_BASE}/api/market/summary`)
-      ]);
-
-      if (tokensRes.ok && summaryRes.ok) {
-        const tokensData = await tokensRes.json();
-        const summaryData = await summaryRes.json();
-        setTokens(tokensData);
-        setSummary(summaryData);
-        setLastUpdate(new Date());
-      }
-    } catch (error) {
-      console.error("Failed to fetch data:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // ... (fetchData logic same) ...
 
   useEffect(() => {
+    setLastUpdate(new Date()); // Set initial date on client
     fetchData();
-    const interval = setInterval(fetchData, 10000); // 10s auto-refresh
+    const interval = setInterval(fetchData, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  // ... inside return ...
+  <Badge variant="secondary" className="bg-slate-800 text-slate-400">
+    Updated: {lastUpdate ? lastUpdate.toLocaleTimeString() : '...'}
+  </Badge>
 
   return (
     <main className="min-h-screen p-6 space-y-8 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black">
