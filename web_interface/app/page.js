@@ -53,7 +53,7 @@ export default function Home() {
   //   Updated: {lastUpdate ? lastUpdate.toLocaleTimeString() : '...'}
   // </Badge>
 
-  const [selectedModel, setSelectedModel] = useState("bilstm");
+  // const [selectedModel, setSelectedModel] = useState("bilstm"); // Removed
   const [analysisLoading, setAnalysisLoading] = useState(false);
 
   // Deep Analysis Function
@@ -62,7 +62,8 @@ export default function Home() {
 
     try {
       setAnalysisLoading(true);
-      const res = await fetch(`${API_BASE}/api/tokens/${selectedToken.token_address}/predict?chain=${selectedToken.chain}&model=${selectedModel}`);
+      // No model param needed anymore
+      const res = await fetch(`${API_BASE}/api/tokens/${selectedToken.token_address}/predict?chain=${selectedToken.chain}`);
 
       if (res.ok) {
         const data = await res.json();
@@ -73,15 +74,18 @@ export default function Home() {
             ...prev.prediction,
             confidence: data.prediction.ensemble.confidence,
             pump_in_hours: data.prediction.ensemble.pump_in_hours,
-            source: data.model_type // Mark source as the specific model
+            source: data.prediction.ensemble.model // e.g., GEM_PATTERN or SUPER_ENSEMBLE
           },
           detailed_analysis: data // Store full response if needed
         }));
       } else {
-        console.error("Analysis failed");
+        const errorData = await res.json().catch(() => ({ detail: "Unknown Error" }));
+        console.error("Analysis failed:", errorData);
+        alert(`Analysis failed: ${errorData.detail || "Server Error"}`);
       }
     } catch (error) {
       console.error("Deep analysis error:", error);
+      alert("Network Error: Could not reach backend.");
     } finally {
       setAnalysisLoading(false);
     }
@@ -183,28 +187,17 @@ export default function Home() {
                   </CardHeader>
                   <CardContent className="space-y-5 pt-4 relative z-10">
 
-                    {/* Model Selector & Action */}
+                    {/* Action Button Only (No Selector) */}
                     <div className="flex items-center gap-2">
-                      <select
-                        value={selectedModel}
-                        onChange={(e) => setSelectedModel(e.target.value)}
-                        className="bg-slate-900/80 border border-slate-700 text-slate-300 text-xs rounded-lg p-2.5 focus:ring-cyan-500 focus:border-cyan-500 w-[140px]"
-                      >
-                        <option value="bilstm">Bi-LSTM (Default)</option>
-                        <option value="lstm">LSTM (Standard)</option>
-                        <option value="gru">GRU (Fast)</option>
-                        <option value="conv1d">Conv1D (Pattern)</option>
-                        <option value="transformer">Time-GPT (Slow)</option>
-                      </select>
                       <Button
                         onClick={runDeepAnalysis}
                         disabled={analysisLoading}
-                        className={`flex-1 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 border border-purple-500/30 font-bold tracking-wider ${analysisLoading ? 'opacity-80' : ''}`}
+                        className={`w-full h-12 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 border border-purple-500/30 font-bold tracking-wider text-md shadow-[0_0_20px_rgba(168,85,247,0.4)] ${analysisLoading ? 'opacity-80' : ''}`}
                       >
                         {analysisLoading ? (
-                          <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> TRAINING MODEL...</>
+                          <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> RUNNING SUPER-ENSEMBLE AI...</>
                         ) : (
-                          <><Zap className="mr-2 h-4 w-4" /> RUN DEEP ANALYSIS</>
+                          <><Zap className="mr-2 h-5 w-5 fill-yellow-400 text-yellow-100" /> SCAN FOR GEMS (AI AUTO)</>
                         )}
                       </Button>
                     </div>

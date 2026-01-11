@@ -1,12 +1,8 @@
 """
-Price Predictor V3 - Multi-Model AI Engine
-========================================
-Supports:
-- Bi-LSTM (Default)
-- LSTM (Standard)
-- GRU (Fast Recurrent)
-- Conv1D (CNN Pattern Recognition)
-- Transformer (Time-GPT style Attention)
+Price Predictor V4 - Super-Ensemble & Gem Hunter
+=============================================
+1. Super-Ensemble: Combines Transformer + Bi-LSTM + Conv1D for deep analysis.
+2. Gem Hunter: Heuristic scanner for new tokens (no history).
 """
 
 import numpy as np
@@ -46,401 +42,282 @@ except ImportError:
 
 
 class FeatureEngineer:
-    """Generate technical indicators for better prediction"""
+    """Generate technical indicators"""
     
     @staticmethod
     def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
-        """Add RSI, MACD, Bollinger Bands, and more"""
         if not TA_AVAILABLE or 'close' not in df.columns:
             return df
         
         df = df.copy()
-        
-        # Price-based features
-        df['returns'] = df['close'].pct_change()
-        df['log_returns'] = np.log(df['close'] / df['close'].shift(1))
-        
-        # Moving Averages
-        df['sma_5'] = df['close'].rolling(window=5).mean()
-        df['sma_10'] = df['close'].rolling(window=10).mean()
-        df['ema_5'] = df['close'].ewm(span=5).mean()
-        df['ema_10'] = df['close'].ewm(span=10).mean()
-        
-        # RSI
-        df['rsi'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
-        
-        # MACD
-        macd = ta.trend.MACD(df['close'])
-        df['macd'] = macd.macd()
-        df['macd_signal'] = macd.macd_signal()
-        df['macd_diff'] = macd.macd_diff()
-        
-        # Bollinger Bands
-        bb = ta.volatility.BollingerBands(df['close'], window=20)
-        df['bb_upper'] = bb.bollinger_hband()
-        df['bb_lower'] = bb.bollinger_lband()
-        df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['close']
-        df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
-        
-        # Volume indicators
-        if 'volume' in df.columns:
-            df['volume_sma'] = df['volume'].rolling(window=10).mean()
-            df['volume_ratio'] = df['volume'] / df['volume_sma']
-            df['obv'] = ta.volume.OnBalanceVolumeIndicator(df['close'], df['volume']).on_balance_volume()
-        
-        # ATR (Volatility)
-        if all(col in df.columns for col in ['high', 'low', 'close']):
-            df['atr'] = ta.volatility.AverageTrueRange(df['high'], df['low'], df['close']).average_true_range()
-        
-        # Momentum
-        df['momentum'] = df['close'] - df['close'].shift(10)
-        df['roc'] = df['close'].pct_change(periods=10) * 100
-        
-        # Fill NaN
-        df = df.fillna(method='bfill').fillna(0)
-        
+        try:
+             # Basic Returns
+            df['returns'] = df['close'].pct_change()
+            
+            # RSI
+            df['rsi'] = ta.momentum.RSIIndicator(df['close'], window=14).rsi()
+            
+            # MACD
+            macd = ta.trend.MACD(df['close'])
+            df['macd'] = macd.macd_diff()
+            
+            # Bollinger Bands
+            bb = ta.volatility.BollingerBands(df['close'], window=20)
+            df['bb_width'] = (bb.bollinger_hband() - bb.bollinger_lband()) / df['close']
+            
+            # Volume
+            if 'volume' in df.columns:
+                df['volume_sma'] = df['volume'].rolling(window=10).mean()
+                df['volume_ratio'] = df['volume'] / (df['volume_sma'] + 1e-6)
+            
+            # Fill NaN safely
+            df = df.bfill().fillna(0)
+            
+        except Exception as e:
+            print(f"Feature Eng Error: {e}")
+            df = df.fillna(0)
+            
         return df
 
 
-class DeepLearningPredictor:
+class GemHunter:
     """
-    Modular Deep Learning Engine
-    Supports: LSTM, Bi-LSTM, GRU, Conv1D, Transformer (Time-GPT)
+    Fallback Analysis for New Tokens (Zero History/404).
+    Uses Snapshot Data (SNA, Liquidity, FDV) to score potential.
     """
     
-    def __init__(self, model_type: str = 'bilstm', lookback: int = 24, units: int = 64):
-        self.model_type = model_type.lower()
+    @staticmethod
+    def analyze_token(token_info: Dict, sna_score: float) -> Dict:
+        """Score a token based on static metrics"""
+        try:
+            # Extract metrics with defaults
+            liquidity = float(token_info.get('liquidity', {}).get('usd', 0))
+            fdv = float(token_info.get('fdv', 0))
+            volume_24h = float(token_info.get('volume', {}).get('h24', 0))
+            
+            # Heuristic Scoring
+            score = 0
+            
+            # 1. SNA Score (Social/Smart Money) - High Weight
+            score += sna_score * 0.4
+            
+            # 2. Liquidity Health (Avoid too low or too high for moonshots)
+            if 1000 < liquidity < 500000: # Sweet spot for gems
+                score += 20
+            elif liquidity >= 500000:
+                score += 10 # Stable but less X potential
+            else:
+                score -= 20 # Rug risk
+                
+            # 3. Volume/Liquidity Ratio (Activity)
+            if liquidity > 0:
+                vol_liq_ratio = volume_24h / liquidity
+                if vol_liq_ratio > 0.5: score += 15 # High activity
+                elif vol_liq_ratio > 0.1: score += 10
+            
+            # 4. FDV Check (Undervalued?)
+            if 0 < fdv < 1000000: # Micro cap
+                score += 15
+            
+            # Normalize Score (0-100)
+            final_score = min(max(score, 10), 95)
+            
+            # Estimate Pump Timeframe based on Hype (SNA)
+            if sna_score > 80: hours = 1   # Imminent
+            elif sna_score > 60: hours = 4
+            else: hours = 12
+            
+            return {
+                "confidence": round(final_score, 1),
+                "pump_in_hours": hours,
+                "model": "GEM_PATTERN",
+                "message": "Analisis Pattern Dasar (Data History Kurang)"
+            }
+            
+        except Exception as e:
+            print(f"GemHunter Error: {e}")
+            return {"confidence": 50, "pump_in_hours": 24, "model": "ERROR", "message": "Gagal Menganalisis"}
+
+
+class SuperEnsemblePredictor:
+    """
+    Unified Deep Learning Engine.
+    Trains Transformer, Bi-LSTM, and Conv1D internally.
+    """
+    
+    def __init__(self, lookback: int = 24):
         self.lookback = lookback
-        self.units = units
-        self.model = None
+        self.models = {} # Store sub-models
+        self.is_trained = False
         self.scaler = RobustScaler() if TF_AVAILABLE else None
         self.feature_scaler = RobustScaler() if TF_AVAILABLE else None
-        self.is_trained = False
         self.feature_cols = []
-    
-    def prepare_data(self, df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
-        """Prepare multi-feature data"""
-        # Add technical indicators
+
+    def prepare_data(self, df: pd.DataFrame):
         df = FeatureEngineer.add_technical_indicators(df)
-        
-        # Select features
-        self.feature_cols = [col for col in df.columns 
-                            if col not in ['timestamp', 'open', 'high', 'low']]
-        
+        self.feature_cols = [c for c in df.columns if c not in ['timestamp', 'open', 'high', 'low']]
         features = df[self.feature_cols].values
         target = df['close'].values.reshape(-1, 1)
         
-        # Scale
-        features_scaled = self.feature_scaler.fit_transform(features)
+        feat_scaled = self.feature_scaler.fit_transform(features)
         target_scaled = self.scaler.fit_transform(target)
         
         X, y = [], []
-        for i in range(self.lookback, len(features_scaled)):
-            X.append(features_scaled[i-self.lookback:i])
+        for i in range(self.lookback, len(feat_scaled)):
+            X.append(feat_scaled[i-self.lookback:i])
             y.append(target_scaled[i, 0])
-        
+            
         return np.array(X), np.array(y)
-    
-    def _build_transformer_block(self, inputs, head_size, num_heads, ff_dim, dropout=0):
-        """Transformer Encoder Block (Time-GPT Style)"""
-        x = LayerNormalization(epsilon=1e-6)(inputs)
-        x = MultiHeadAttention(key_dim=head_size, num_heads=num_heads, dropout=dropout)(x, x)
-        x = Dropout(dropout)(x)
-        res = Add()([x, inputs])
-        
-        # Feed Forward Part
-        x = LayerNormalization(epsilon=1e-6)(res)
-        x = Conv1D(filters=ff_dim, kernel_size=1, activation="relu")(x)
-        x = Dropout(dropout)(x)
-        x = Conv1D(filters=inputs.shape[-1], kernel_size=1)(x)
-        return Add()([x, res])
 
-    def build_model(self, n_features: int):
-        """Build model architecture based on self.model_type"""
-        if not TF_AVAILABLE:
-            return None
+    def _build_model_arch(self, arch: str, input_shape):
+        inputs = Input(shape=input_shape)
         
-        inputs = Input(shape=(self.lookback, n_features))
-        
-        # === Architecture Selection ===
-        
-        if self.model_type == 'transformer': 
-            # Time-GPT Style Transformer
-            x = self._build_transformer_block(inputs, head_size=64, num_heads=4, ff_dim=128, dropout=0.1)
-            x = self._build_transformer_block(x, head_size=64, num_heads=4, ff_dim=128, dropout=0.1)
+        if arch == 'transformer':
+            # Time-GPT Lite
+            x = LayerNormalization(epsilon=1e-6)(inputs)
+            x = MultiHeadAttention(key_dim=64, num_heads=4, dropout=0.1)(x, x)
+            x = Dropout(0.1)(x)
+            res = Add()([x, inputs])
+            x = LayerNormalization(epsilon=1e-6)(res)
+            x = Conv1D(filters=64, kernel_size=1, activation="relu")(x)
             x = GlobalAveragePooling1D()(x)
             
-        elif self.model_type == 'conv1d':
-            # 1D Convolutional Network (Pattern Recognition)
-            x = Conv1D(filters=64, kernel_size=3, activation='relu')(inputs)
-            x = Conv1D(filters=128, kernel_size=3, activation='relu')(x)
-            x = MaxPooling1D(pool_size=2)(x)
+        elif arch == 'conv1d':
+            # Pattern Recognition
+            x = Conv1D(64, 3, activation='relu')(inputs)
+            x = MaxPooling1D(2)(x)
             x = Flatten()(x)
             
-        elif self.model_type == 'gru':
-            # Gated Recurrent Unit (Faster/Efficient)
-            x = GRU(self.units, return_sequences=True)(inputs)
-            x = Dropout(0.2)(x)
-            x = GRU(self.units)(x)
-            x = Dropout(0.2)(x)
-            
-        elif self.model_type == 'lstm':
-            # Standard LSTM
-            x = LSTM(self.units, return_sequences=True)(inputs)
-            x = Dropout(0.2)(x)
-            x = LSTM(self.units)(x)
-            x = Dropout(0.2)(x)
-            
-        else: # Default: 'bilstm'
-            # Bidirectional LSTM (Deep context)
-            x = Bidirectional(LSTM(self.units, return_sequences=True))(inputs)
-            x = Dropout(0.2)(x)
-            x = Bidirectional(LSTM(self.units, return_sequences=True))(x)
-            x = Dropout(0.2)(x)
-            # Attention mechanism
-            attention = MultiHeadAttention(num_heads=4, key_dim=self.units)(x, x)
-            x = LayerNormalization()(x + attention)
+        else: # 'bilstm' (Default)
+            x = Bidirectional(LSTM(64, return_sequences=True))(inputs)
             x = GlobalAveragePooling1D()(x)
-
-        # === Common Output Head ===
-        x = Dense(64, activation='relu')(x)
-        x = Dropout(0.2)(x)
+            
         x = Dense(32, activation='relu')(x)
         outputs = Dense(1)(x)
         
-        self.model = Model(inputs, outputs)
-        self.model.compile(
-            optimizer=Adam(learning_rate=0.001),
-            loss='huber',  # Robust loss
-            metrics=['mae']
-        )
-        return self.model
-    
-    def train_model(self, df: pd.DataFrame, epochs: int = 150, verbose: int = 0) -> Dict:
-        """Train Deep Learning Model"""
-        print(f"{Fore.CYAN}[AI-ENGINE] Training {self.model_type.upper()} Model...{Style.RESET_ALL}")
-        
+        model = Model(inputs, outputs)
+        model.compile(optimizer=Adam(0.001), loss='huber', metrics=['mae'])
+        return model
+
+    def train_ensemble(self, df: pd.DataFrame, epochs: int = 50) -> Dict:
+        """Trains multiple architectures sequentially"""
         if not TF_AVAILABLE:
             self.is_trained = True
-            return {"status": "simulated", "accuracy": 85.0}
+            return {"status": "simulated", "accuracy": 88.0}
+            
+        print(f"{Fore.CYAN}[AI-SUPER] Training Unified Ensemble (Transformer + LSTM + CNN)...{Style.RESET_ALL}")
         
         try:
             X, y = self.prepare_data(df)
+            if len(X) < 10: return {"status": "insufficient_data"}
             
-            if len(X) < 15:
-                return {"status": "insufficient_data"}
-            
-            # Build model
-            self.build_model(n_features=X.shape[2])
-            
-            # Split
             X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, shuffle=False)
             
-            # Callbacks
-            callbacks = [
-                EarlyStopping(monitor='val_loss', patience=15, restore_best_weights=True),
-                ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=7, min_lr=1e-6)
-            ]
-            
-            # Train
-            history = self.model.fit(
-                X_train, y_train,
-                epochs=epochs,
-                batch_size=16,
-                validation_data=(X_val, y_val),
-                callbacks=callbacks,
-                verbose=verbose
-            )
-            
+            # Train 3 variations
+            accuracies = []
+            for arch in ['transformer', 'bilstm', 'conv1d']:
+                print(f"   > Training submodule: {arch}...")
+                model = self._build_model_arch(arch, (self.lookback, X.shape[2]))
+                
+                hist = model.fit(
+                    X_train, y_train, 
+                    epochs=epochs, 
+                    batch_size=16, 
+                    validation_data=(X_val, y_val),
+                    verbose=0,
+                    callbacks=[EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)]
+                )
+                self.models[arch] = model
+                
+                # Est Accuracy
+                val_mae = min(hist.history['val_mae'])
+                accuracies.append(max(0, (1 - val_mae) * 100))
+                
             self.is_trained = True
-            
-            # Metric
-            val_mae = min(history.history['val_mae'])
-            accuracy = max(0, (1 - val_mae) * 100)
-            accuracy = min(accuracy, 99.5)
-            
-            print(f"{Fore.GREEN}[AI-ENGINE] {self.model_type.upper()} Training Complete! Acc: {accuracy:.1f}%{Style.RESET_ALL}")
-            return {"status": "success", "accuracy": accuracy, "epochs_run": len(history.history['loss'])}
+            avg_acc = np.mean(accuracies)
+            print(f"{Fore.GREEN}[AI-SUPER] Ensemble Ready! Avg Accuracy: {avg_acc:.1f}%{Style.RESET_ALL}")
+            return {"status": "success", "accuracy": avg_acc}
             
         except Exception as e:
-            print(f"{Fore.RED}[ERROR] Training failed: {e}{Style.RESET_ALL}")
+            print(f"Ensemble Train Error: {e}")
             traceback.print_exc()
-            return {"status": "error", "message": str(e)}
-    
-    def predict(self, df: pd.DataFrame, hours_ahead: int = 4) -> Dict:
-        """Predict future price movement"""
+            return {"status": "error"}
+
+    def predict(self, df: pd.DataFrame) -> Dict:
+        """Predict using average of all models"""
         if not self.is_trained or not TF_AVAILABLE:
-            return self._fallback_predict(df, hours_ahead)
-        
+             return {"error": "Model not trained"}
+             
         try:
             df_feat = FeatureEngineer.add_technical_indicators(df)
             features = df_feat[self.feature_cols].values[-self.lookback:]
             
-            # Handle insufficient data length
             if len(features) < self.lookback:
-                 # Pad with first row if needed (simple fix, though ideal is to fetch more data)
                  padding = np.tile(features[0], (self.lookback - len(features), 1))
                  features = np.vstack([padding, features])
-            
+                 
             features_scaled = self.feature_scaler.transform(features)
             X = features_scaled.reshape(1, self.lookback, -1)
             
-            predictions = []
-            current_seq = X.copy()
+            # Predict with all models
+            preds = []
+            for name, model in self.models.items():
+                p = model.predict(X, verbose=0)[0, 0]
+                preds.append(p)
             
-            for _ in range(hours_ahead):
-                pred = self.model.predict(current_seq, verbose=0)[0, 0]
-                predictions.append(pred)
-                current_seq = np.roll(current_seq, -1, axis=1)
-                current_seq[0, -1, 0] = pred
-            
-            pred_prices = self.scaler.inverse_transform(np.array(predictions).reshape(-1, 1))
+            # Average Prediction
+            avg_pred_scaled = np.mean(preds)
+            pred_price = self.scaler.inverse_transform([[avg_pred_scaled]])[0][0]
             current_price = df['close'].iloc[-1]
+            pump_pct = (pred_price - current_price) / current_price * 100
             
-            price_changes = [(p[0] - current_price) / current_price * 100 for p in pred_prices]
-            max_idx = np.argmax(price_changes)
+            # Calc Confidence
+            divergence = np.std(preds) # High divergence = low confidence
+            confidence = max(50, 95 - (divergence * 50))
             
             return {
-                "current_price": current_price,
-                "predicted_prices": pred_prices.flatten().tolist(),
-                "price_changes": price_changes,
-                "max_pump_hour": max_idx + 1,
-                "max_pump_pct": price_changes[max_idx],
-                "confidence": self._calc_confidence(price_changes, df),
-                "model_used": self.model_type
+                "confidence": confidence,
+                "pump_in_hours": 4 if pump_pct > 2 else 12, # Simplified logic for now
+                "predicted_price": pred_price,
+                "model": "SUPER_ENSEMBLE",
+                "message": "Deep Learning Multi-Model Consensus"
             }
+            
         except Exception as e:
-            print(f"Prediction error: {e}")
-            return self._fallback_predict(df, hours_ahead)
+            print(f"Ensemble Predict Error: {e}")
+            return {"error": str(e)}
+
+
+# Wrapper
+def analyze_token_comprehensive(hist_data: pd.DataFrame, token_info: Dict, sna_score: float) -> Dict:
+    """
+    Main Entry Point: Decides between Deep Learning or GemHunter
+    """
+    # CASE 1: No Historical Data -> Gem Hunter
+    if hist_data.empty or len(hist_data) < 5:
+        print(f"{Fore.YELLOW}[ANALYSIS] No history. Switching to GEM HUNTER mode.{Style.RESET_ALL}")
+        return GemHunter.analyze_token(token_info, sna_score)
+        
+    # CASE 2: Sufficient Data -> Super Ensemble
+    print(f"{Fore.CYAN}[ANALYSIS] Historical Data Found ({len(hist_data)} candles). Running SUPER ENSEMBLE.{Style.RESET_ALL}")
     
-    def _fallback_predict(self, df: pd.DataFrame, hours: int) -> Dict:
-        if df.empty:
-            return {"error": "No data"}
-        
-        current = df['close'].iloc[-1]
-        momentum = df['close'].pct_change().mean() * 100
-        vol = df['close'].pct_change().std() * 100
-        
-        np.random.seed(int(datetime.now().timestamp()) % 1000)
-        changes = [momentum * (i+1) * 0.8 + np.random.normal(0, vol*0.5) for i in range(hours)]
-        max_idx = np.argmax(changes)
-        
-        return {
-            "current_price": current,
-            "predicted_prices": [current * (1 + c/100) for c in changes],
-            "price_changes": changes,
-            "max_pump_hour": max_idx + 1,
-            "max_pump_pct": changes[max_idx],
-            "confidence": min(70 + abs(momentum) * 3, 92),
-            "model_used": "simulated"
-        }
+    predictor = SuperEnsemblePredictor()
+    train_res = predictor.train_ensemble(hist_data, epochs=30)
     
-    def _calc_confidence(self, changes: List[float], df: pd.DataFrame) -> float:
-        if not changes:
-            return 50.0
+    if train_res['status'] != 'success':
+         # Fallback if training fails
+         return GemHunter.analyze_token(token_info, sna_score)
+         
+    pred = predictor.predict(hist_data)
+    if "error" in pred:
+        return GemHunter.analyze_token(token_info, sna_score)
         
-        trend = abs(np.mean(changes))
-        consistency = max(0, 100 - np.std(changes) * 3)
-        
-        tech_score = 0
-        if TA_AVAILABLE:
-            rsi = ta.momentum.RSIIndicator(df['close']).rsi().iloc[-1]
-            if 30 < rsi < 70:
-                tech_score += 10
-            if df['close'].iloc[-1] > df['close'].rolling(10).mean().iloc[-1]:
-                tech_score += 10
-        
-        confidence = (trend * 1.5 + consistency * 0.5 + tech_score) / 2
-        return min(max(confidence, 50), 98)
-
-
-class EnsemblePredictor:
-    """Ensemble: Deep Learning + Machine Learning"""
+    # Enhance prediction with SNA
+    final_conf = (pred['confidence'] * 0.7) + (sna_score * 0.3)
     
-    def __init__(self, model_type='bilstm'):
-        self.dl_model = DeepLearningPredictor(model_type=model_type)
-        self.gb_model = None
-        self.is_trained = False
-    
-    def train(self, df: pd.DataFrame, epochs: int = 150) -> Dict:
-        print(f"{Fore.CYAN}[ENSEMBLE] Training with {self.dl_model.model_type.upper()} base...{Style.RESET_ALL}")
-        
-        # Train DL Model
-        dl_result = self.dl_model.train_model(df, epochs=epochs)
-        
-        # Train ML Model (Gradient Boosting) as supplement
-        if TF_AVAILABLE and len(df) > 30:
-            try:
-                df_feat = FeatureEngineer.add_technical_indicators(df)
-                feature_cols = [c for c in df_feat.columns if c not in ['timestamp', 'close']]
-                X = df_feat[feature_cols].values[:-1]
-                y = df_feat['close'].shift(-1).dropna().values
-                
-                if len(X) == len(y):
-                    self.gb_model = GradientBoostingRegressor(n_estimators=100, max_depth=5)
-                    self.gb_model.fit(X, y)
-            except Exception as e:
-                print(f"ML Training error: {e}")
-        
-        self.is_trained = True
-        
-        dl_acc = dl_result.get('accuracy', 70)
-        ensemble_acc = min(dl_acc * 1.05, 98)
-        
-        return {"status": "success", "accuracy": ensemble_acc, "model_type": self.dl_model.model_type}
-    
-    def predict(self, df: pd.DataFrame, sna_score: float = 50) -> Dict:
-        dl_pred = self.dl_model.predict(df)
-        
-        # Base confidence
-        base_conf = dl_pred.get('confidence', 50)
-        
-        # SNA Boost
-        sna_boost = min(sna_score, 100) * 0.25
-        
-        # Final Score
-        final_conf = (base_conf * 0.5) + sna_boost + 20
-        final_conf = min(max(final_conf, 50), 98)
-        
-        pump_hours = dl_pred.get('max_pump_hour', 4)
-        if sna_score > 70: pump_hours = max(1, pump_hours - 2)
-        
-        return {
-            "dl_prediction": dl_pred,
-            "ensemble": {
-                "pump_in_hours": pump_hours,
-                "confidence": round(final_conf, 1),
-                "model": self.dl_model.model_type,
-                "message": f"Potensi Pump dalam {pump_hours} jam ({final_conf:.0f}% confidence)"
-            }
-        }
-
-
-# Wrapper Functions for Backward Compatibility
-
-def train_model(data: pd.DataFrame, epochs: int = 150, model_type: str = 'bilstm') -> Tuple:
-    predictor = EnsemblePredictor(model_type=model_type)
-    result = predictor.train(data, epochs=epochs)
-    return predictor, result
-
-
-def predict_pump_time(model, recent_data: pd.DataFrame, sna_score: float = 50) -> Dict:
-    if hasattr(model, 'predict'):
-        return model.predict(recent_data, sna_score)
-    return {"error": "Model not trained"}
-
-
-def format_prediction(prediction: Dict, token_symbol: str) -> str:
-    ens = prediction.get("ensemble", {})
-    hours = ens.get("pump_in_hours", "N/A")
-    conf = ens.get("confidence", 0)
-    model = ens.get("model", "unknown").upper()
-    
-    if conf > 85:
-        emoji, color = "🚀", Fore.GREEN
-    elif conf > 70:
-        emoji, color = "📈", Fore.YELLOW
-    else:
-        emoji, color = "📊", Fore.WHITE
-    
-    return f"{color}{emoji} {token_symbol} [{model}]: Pump ~{hours}h | Conf: {conf:.0f}%{Style.RESET_ALL}"
+    return {
+        "confidence": min(final_conf, 99),
+        "pump_in_hours": pred['pump_in_hours'],
+        "model": "SUPER_ENSEMBLE",
+        "message": f"Deep Learning Analysis (Acc: {train_res.get('accuracy',0):.0f}%)"
+    }
