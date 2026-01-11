@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  # Service untuk bot scanner & predictor (sekali jalan)
+  cryptohunter-bot:
+    build: .
+    container_name: cryptohunter-bot
+    image: cryptohunter:latest
+    volumes:
+      - .:/app
+    command: python main_bot.py
+    stdin_open: true # For interactive input if needed
+    tty: true
+
+  # Service untuk live dashboard (terus berjalan)
+  cryptohunter-dashboard:
+    build: .
+    container_name: cryptohunter-dashboard
+    image: cryptohunter:latest
+    volumes:
+      - .:/app
+    command: python live_dashboard.py
+    stdin_open: true
+    tty: true
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
