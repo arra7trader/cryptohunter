@@ -95,7 +95,7 @@ export default function Home() {
               Live Scanner
             </h2>
             <Badge variant="secondary" className="bg-slate-800 text-slate-400">
-              Updated: {lastUpdate.toLocaleTimeString()}
+              Updated: {lastUpdate ? lastUpdate.toLocaleTimeString() : '...'}
             </Badge>
           </div>
           <TokenTable tokens={tokens} onSelectToken={setSelectedToken} />
