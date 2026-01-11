@@ -17,7 +17,7 @@ from datetime import datetime
 # Import existing modules
 from modules.dex_api import DexScreenerAPI, get_historical_data
 from modules.sna_analyzer import SNAAnalyzer
-from modules.price_predictor import train_model, predict_pump_time
+from modules.price_predictor import analyze_token_comprehensive
 from modules.db import db
 
 app = FastAPI(
