@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowUpRight, ArrowDownRight, RefreshCw, Crosshair, ExternalLink } from "lucide-react";
 
 export default function TokenTable({ tokens, onSelectToken }) {
-    if (!tokens || tokens.length === 0) {
+    if (!tokens || !Array.isArray(tokens) || tokens.length === 0) {
         return (
             <div className="flex flex-col items-center justify-center h-64 text-muted-foreground p-8 border rounded-lg border-dashed border-slate-700 bg-slate-900/50">
                 <RefreshCw className="h-8 w-8 mb-4 animate-spin" />

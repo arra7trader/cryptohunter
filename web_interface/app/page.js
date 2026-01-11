@@ -29,7 +29,7 @@ export default function Home() {
       if (tokensRes.ok && summaryRes.ok) {
         const tokensData = await tokensRes.json();
         const summaryData = await summaryRes.json();
-        setTokens(tokensData);
+        setTokens(Array.isArray(tokensData) ? tokensData : []);
         setSummary(summaryData);
         setLastUpdate(new Date());
       }
