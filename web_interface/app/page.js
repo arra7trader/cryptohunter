@@ -145,15 +145,15 @@ export default function Home() {
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div className="flex justify-between border-b border-slate-800 pb-2">
                       <span className="text-slate-500">SNA Score</span>
-                      <span className="font-mono text-yellow-400">{selectedToken.sna_score.toFixed(0)}/100</span>
+                      <span className="font-mono text-yellow-400">{(selectedToken.sna_score || 0).toFixed(0)}/100</span>
                     </div>
                     <div className="flex justify-between border-b border-slate-800 pb-2">
                       <span className="text-slate-500">Liquidity</span>
-                      <span className="font-mono">${(selectedToken.liquidity_usd / 1000).toFixed(1)}K</span>
+                      <span className="font-mono">${((selectedToken.liquidity_usd || 0) / 1000).toFixed(1)}K</span>
                     </div>
                     <div className="flex justify-between border-b border-slate-800 pb-2">
                       <span className="text-slate-500">Volume 1H</span>
-                      <span className="font-mono">${(selectedToken.volume_1h / 1000).toFixed(1)}K</span>
+                      <span className="font-mono">${((selectedToken.volume_1h || 0) / 1000).toFixed(1)}K</span>
                     </div>
                     <div className="flex justify-between border-b border-slate-800 pb-2">
                       <span className="text-slate-500">Chain</span>

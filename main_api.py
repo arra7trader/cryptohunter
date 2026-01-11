@@ -112,6 +112,12 @@ def update_market_cache():
         # We don't run full LSTM for list view to keep it fast, only on detail view or specific request
         sna_results = sna_analyzer.analyze_batch(pairs_df)
         
+        def safe_float(val):
+            try:
+                return float(val) if val is not None else 0.0
+            except:
+                return 0.0
+
         for idx, row in pairs_df.iterrows():
             token_symbol = row['base_token']
             
@@ -123,7 +129,7 @@ def update_market_cache():
                     break
             
             # Simple Status
-            c5m = row['price_change_5m']
+            c5m = safe_float(row['price_change_5m'])
             status = "NEUTRAL"
             if c5m <= -10: status = "CRASH"
             elif c5m <= -5: status = "DUMP"
@@ -131,21 +137,23 @@ def update_market_cache():
             
             # Basic Prediction (Fast)
             # Full LSTM is triggered on demand
+            vol = safe_float(row['volume_1h'])
+            liq = safe_float(row['liquidity_usd'])
             conf = 50 + (sna_score * 0.3)
-            if row['volume_1h'] / max(1, row['liquidity_usd']) > 2:
+            if vol / max(1, liq) > 2:
                 conf += 10
             conf = int(min(95, max(40, conf)))
             
             token_data = {
-                "token": token_symbol,
+                "token": str(token_symbol),
                 "chain": str(row['chain_id']).upper(),
-                "token_address": row['base_token_address'],
-                "price_usd": float(row['price_usd']),
-                "price_change_5m": float(row['price_change_5m']),
-                "price_change_1h": float(row['price_change_1h']),
-                "volume_1h": float(row['volume_1h']),
-                "liquidity_usd": float(row['liquidity_usd']),
-                "market_cap": float(row['market_cap']),
+                "token_address": str(row['base_token_address']),
+                "price_usd": safe_float(row['price_usd']),
+                "price_change_5m": c5m,
+                "price_change_1h": safe_float(row['price_change_1h']),
+                "volume_1h": vol,
+                "liquidity_usd": liq,
+                "market_cap": safe_float(row['market_cap']),
                 "sna_score": float(sna_score),
                 "prediction": {
                     "confidence": conf,

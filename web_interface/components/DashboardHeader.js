@@ -32,7 +32,7 @@ export default function DashboardHeader({ data }) {
                         <BarChart3 className="h-4 w-4" />
                         <span className="text-sm font-medium">Total Volume (1H)</span>
                     </div>
-                    <div className="text-3xl font-bold">${(total_volume / 1000000).toFixed(2)}M</div>
+                    <div className="text-3xl font-bold">${((total_volume || 0) / 1000000).toFixed(2)}M</div>
                     <p className="text-xs text-slate-500">Across all providers</p>
                 </CardContent>
             </Card>
@@ -44,7 +44,7 @@ export default function DashboardHeader({ data }) {
                         <span className="text-sm font-medium">Gainers</span>
                     </div>
                     <div className="text-3xl font-bold text-green-500">{gainers}</div>
-                    <p className="text-xs text-slate-500">Avg Change: {avg_change > 0 ? "+" : ""}{avg_change.toFixed(2)}%</p>
+                    <p className="text-xs text-slate-500">Avg Change: {avg_change > 0 ? "+" : ""}{(avg_change || 0).toFixed(2)}%</p>
                 </CardContent>
             </Card>
 

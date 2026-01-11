@@ -17,12 +17,14 @@ export default function TokenTable({ tokens, onSelectToken }) {
     }
 
     const formatPrice = (price) => {
+        if (typeof price !== 'number') return '$0.00';
         if (price > 1) return `$${price.toFixed(4)}`;
         if (price > 0.0001) return `$${price.toFixed(6)}`;
         return `$${price.toFixed(10)}`;
     };
 
     const formatNumber = (num) => {
+        if (typeof num !== 'number') return '0';
         if (num >= 1000000) return `$${(num / 1000000).toFixed(2)}M`;
         if (num >= 1000) return `$${(num / 1000).toFixed(1)}K`;
         return `$${num.toFixed(0)}`;
@@ -83,7 +85,7 @@ export default function TokenTable({ tokens, onSelectToken }) {
                                     <div className="flex items-center space-x-2">
                                         <span
                                             className={`font-bold ${token.prediction?.confidence > 80 ? "text-green-400" :
-                                                    token.prediction?.confidence > 60 ? "text-yellow-400" : "text-slate-500"
+                                                token.prediction?.confidence > 60 ? "text-yellow-400" : "text-slate-500"
                                                 }`}
                                         >
                                             {token.prediction?.confidence}%
