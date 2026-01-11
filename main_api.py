@@ -53,6 +53,8 @@ class DataCache:
         self.last_update = 0
         self.update_interval = 30  # Update every 30s
         self.is_updating = False
+        self.scan_progress = 100
+        self.scan_status = "Idle"
 
 data_cache = DataCache()
 
@@ -83,6 +85,8 @@ class MarketSummary(BaseModel):
     gainers: int
     losers: int
     active_tokens: int
+    scan_progress: int = 100
+    scan_status: str = "Idle"
 
 # --- Background Tasks ---
 
@@ -93,20 +97,27 @@ def update_market_cache():
 
     try:
         data_cache.is_updating = True
+        data_cache.scan_progress = 10
+        data_cache.scan_status = "Fetching from DexScreener"
         print("[API] Updating market cache...")
         
         # 1. Fetch tokens (Now optimized via ThreadPool)
         pairs_df = dex_api.search_new_pairs(min_liquidity=5000)
         
+        data_cache.scan_progress = 30
+        
         if pairs_df.empty:
             print("[API] No pairs found")
             data_cache.is_updating = False
+            data_cache.scan_progress = 100
+            data_cache.scan_status = "Idle"
             return
 
         # Sort by volume and take top 50 (Display ALL first)
         pairs_df = pairs_df.sort_values('volume_1h', ascending=False).head(50)
         
         # === STAGE 1: RAW DATA (IMMEDIATE DISPLAY) ===
+        data_cache.scan_status = "Processing Raw Data"
         # We prepare the list with "SCANNING..." status first so user sees the tokens
         raw_data = []
         
@@ -120,7 +131,6 @@ def update_market_cache():
             token_symbol = str(row['base_token'])
             c5m = safe_float(row['price_change_5m'])
             
-            # Basic Status based on price only
             status = "NEUTRAL"
             if c5m <= -10: status = "CRASH"
             elif c5m <= -5: status = "DUMP"
@@ -140,7 +150,7 @@ def update_market_cache():
                 "prediction": {
                     "confidence": 0,
                     "pump_in_hours": 0,
-                    "source": "scanning..." # Indicator for UI
+                    "source": "scanning..."
                 },
                 "status": "SCANNING"
             }
@@ -150,16 +160,23 @@ def update_market_cache():
         with cache_lock:
             data_cache.market_data = raw_data
             data_cache.last_update = time.time()
+            data_cache.scan_progress = 40
+            
         print(f"[API] Stage 1: Displaying {len(raw_data)} tokens (Raw)")
-
 
         # === STAGE 2: ENRICHMENT (SNA + ANALYSIS) ===
         # Now we process SNA and Logic in the background
+        data_cache.scan_status = "Running SNA & AI Analysis"
         
         sna_results = sna_analyzer.analyze_batch(pairs_df)
+        data_cache.scan_progress = 60
+        
         enriched_data = []
+        total_items = len(raw_data)
 
-        for item in raw_data:
+        for i, item in enumerate(raw_data):
+            # Slow down slightly just to show progress or just process
+            # Realistically this is fast, but let's update progress per batch or item
             token_symbol = item['token']
             
             # Find SNA result
@@ -176,7 +193,6 @@ def update_market_cache():
             liq = item['liquidity_usd']
             conf = 50 + (sna_score * 0.3)
             
-            # Simple Heuristic
             if vol / max(1, liq) > 2:
                 conf += 10
             
@@ -188,17 +204,22 @@ def update_market_cache():
                 "source": "sna_fast"
             }
             
-            # Final Status Update
             if item['price_change_5m'] > 5: item['status'] = "PUMP"
             elif item['price_change_5m'] < -5: item['status'] = "DUMP"
             else: item['status'] = "NEUTRAL"
             
             enriched_data.append(item)
+            
+            # Update progress dynamically between 60 and 90
+            current_progress = 60 + int((i / total_items) * 30)
+            data_cache.scan_progress = current_progress
 
         # Update Cache AGAIN with Enriched Data
         with cache_lock:
             data_cache.market_data = enriched_data
             data_cache.last_update = time.time()
+            data_cache.scan_progress = 100
+            data_cache.scan_status = "Idle"
             
         print(f"[API] Stage 2: Enriched {len(enriched_data)} tokens with SNA")
         
@@ -206,6 +227,8 @@ def update_market_cache():
         print(f"[API] Error updating cache: {e}")
         import traceback
         traceback.print_exc()
+        data_cache.scan_progress = 0
+        data_cache.scan_status = "Error"
     finally:
         data_cache.is_updating = False
 
@@ -221,7 +244,10 @@ def get_market_summary():
     if not data_cache.market_data:
         # Trigger update if empty
         threading.Thread(target=update_market_cache).start()
-        return MarketSummary(total_volume=0, avg_change=0, gainers=0, losers=0, active_tokens=0)
+        return MarketSummary(
+            total_volume=0, avg_change=0, gainers=0, losers=0, active_tokens=0,
+            scan_progress=data_cache.scan_progress, scan_status=data_cache.scan_status
+        )
     
     df = pd.DataFrame(data_cache.market_data)
     
@@ -230,7 +256,9 @@ def get_market_summary():
         avg_change=df['price_change_1h'].mean(),
         gainers=len(df[df['price_change_1h'] > 0]),
         losers=len(df[df['price_change_1h'] < 0]),
-        active_tokens=len(df)
+        active_tokens=len(df),
+        scan_progress=data_cache.scan_progress,
+        scan_status=data_cache.scan_status
     )
 
 @app.get("/api/tokens", response_model=List[TokenData])
