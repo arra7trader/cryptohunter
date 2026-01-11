@@ -32,7 +32,7 @@ class DexScreenerAPI:
             "Accept": "application/json"
         })
         self.last_request_time = 0
-        self.min_request_interval = 1.5  # Minimum 1.5 seconds between requests
+        self.min_request_interval = 0.2  # Reduced to 0.2s (~300 req/min) for speed
         self.cache = {}
         self.cache_ttl = 30  # Cache for 30 seconds
     
