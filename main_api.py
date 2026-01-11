@@ -18,12 +18,18 @@ from datetime import datetime
 from modules.dex_api import DexScreenerAPI, get_historical_data
 from modules.sna_analyzer import SNAAnalyzer
 from modules.price_predictor import train_model, predict_pump_time
+from modules.db import db
 
 app = FastAPI(
     title="CryptoHunter API",
     description="Backend API untuk CryptoHunter AI Dashboard",
-    version="2.0.0"
+    version="2.1.0"
 )
+
+# Initialize DB
+@app.on_event("startup")
+async def startup_event():
+    db.connect()
 
 # Enable CORS for frontend
 app.add_middleware(
@@ -148,6 +154,14 @@ def update_market_cache():
                 },
                 "status": status
             }
+            
+            # Save to Turso DB (Async/Fire-and-forget ideally, but sync here for simplicity)
+            if conf > 60:  # Only save interesting predictions
+                try:
+                    db.save_prediction(token_data)
+                except:
+                    pass
+                    
             new_data.append(token_data)
             
         with cache_lock:
