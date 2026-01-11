@@ -49,9 +49,43 @@ export default function Home() {
   }, []);
 
   // ... inside return ...
-  <Badge variant="secondary" className="bg-slate-800 text-slate-400">
-    Updated: {lastUpdate ? lastUpdate.toLocaleTimeString() : '...'}
-  </Badge>
+  // <Badge variant="secondary" className="bg-slate-800 text-slate-400">
+  //   Updated: {lastUpdate ? lastUpdate.toLocaleTimeString() : '...'}
+  // </Badge>
+
+  const [selectedModel, setSelectedModel] = useState("bilstm");
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+
+  // Deep Analysis Function
+  const runDeepAnalysis = async () => {
+    if (!selectedToken) return;
+
+    try {
+      setAnalysisLoading(true);
+      const res = await fetch(`${API_BASE}/api/tokens/${selectedToken.token_address}/predict?chain=${selectedToken.chain}&model=${selectedModel}`);
+
+      if (res.ok) {
+        const data = await res.json();
+        // Update the selected token with new detailed prediction data
+        setSelectedToken(prev => ({
+          ...prev,
+          prediction: {
+            ...prev.prediction,
+            confidence: data.prediction.ensemble.confidence,
+            pump_in_hours: data.prediction.ensemble.pump_in_hours,
+            source: data.model_type // Mark source as the specific model
+          },
+          detailed_analysis: data // Store full response if needed
+        }));
+      } else {
+        console.error("Analysis failed");
+      }
+    } catch (error) {
+      console.error("Deep analysis error:", error);
+    } finally {
+      setAnalysisLoading(false);
+    }
+  };
 
   return (
     <main className="min-h-screen p-6 space-y-8 relative overflow-hidden">
@@ -128,14 +162,14 @@ export default function Home() {
 
               {selectedToken ? (
                 <>
-                  <CardHeader className="relative z-10 border-b border-white/5 pb-6">
+                  <CardHeader className="relative z-10 border-b border-white/5 pb-2">
                     <div className="flex items-start justify-between">
                       <div>
                         <div className="flex items-center gap-2 mb-2">
                           <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/30 hover:bg-blue-500/30">{selectedToken.chain}</Badge>
                           <span className="text-xs text-slate-400 font-mono">{selectedToken.token_address}</span>
                         </div>
-                        <CardTitle className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-br from-white to-slate-400">
+                        <CardTitle className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-br from-white to-slate-400">
                           {selectedToken.token}
                         </CardTitle>
                       </div>
@@ -147,7 +181,34 @@ export default function Home() {
                       </div>
                     </div>
                   </CardHeader>
-                  <CardContent className="space-y-6 pt-6 relative z-10">
+                  <CardContent className="space-y-5 pt-4 relative z-10">
+
+                    {/* Model Selector & Action */}
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={selectedModel}
+                        onChange={(e) => setSelectedModel(e.target.value)}
+                        className="bg-slate-900/80 border border-slate-700 text-slate-300 text-xs rounded-lg p-2.5 focus:ring-cyan-500 focus:border-cyan-500 w-[140px]"
+                      >
+                        <option value="bilstm">Bi-LSTM (Default)</option>
+                        <option value="lstm">LSTM (Standard)</option>
+                        <option value="gru">GRU (Fast)</option>
+                        <option value="conv1d">Conv1D (Pattern)</option>
+                        <option value="transformer">Time-GPT (Slow)</option>
+                      </select>
+                      <Button
+                        onClick={runDeepAnalysis}
+                        disabled={analysisLoading}
+                        className={`flex-1 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 border border-purple-500/30 font-bold tracking-wider ${analysisLoading ? 'opacity-80' : ''}`}
+                      >
+                        {analysisLoading ? (
+                          <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> TRAINING MODEL...</>
+                        ) : (
+                          <><Zap className="mr-2 h-4 w-4" /> RUN DEEP ANALYSIS</>
+                        )}
+                      </Button>
+                    </div>
+
                     {/* AI Prediction Block */}
                     <div className="bg-gradient-to-r from-slate-900 to-black rounded-xl p-1 border border-white/10 shadow-inner">
                       <div className="bg-white/5 rounded-lg p-5 grid grid-cols-2 gap-4">
@@ -163,6 +224,9 @@ export default function Home() {
                             &lt; {selectedToken.prediction?.pump_in_hours} Hours
                           </div>
                         </div>
+                      </div>
+                      <div className="px-4 py-2 bg-black/40 text-[10px] text-center text-slate-500 font-mono border-t border-white/5">
+                        Source: {selectedToken.prediction?.source === 'sna_fast' ? 'Rapid Scan (SNA)' : `Deep Learning (${selectedModel.toUpperCase()})`}
                       </div>
                     </div>
 

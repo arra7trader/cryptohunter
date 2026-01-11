@@ -222,10 +222,10 @@ async def get_tokens(refresh: bool = False):
         return data_cache.market_data
 
 @app.get("/api/tokens/{address}/predict")
-async def predict_token(address: str, chain: str = "solana"):
+async def predict_token(address: str, chain: str = "solana", model: str = "bilstm"):
     """
-    Deep Analysis endpoint: Runs LSTM model for specific token.
-    This is heavier than the list view prediction.
+    Deep Analysis endpoint: Runs AI model for specific token.
+    Models: 'lstm', 'bilstm', 'gru', 'conv1d', 'transformer'
     """
     try:
         # 1. Get Historical Data
@@ -238,36 +238,39 @@ async def predict_token(address: str, chain: str = "solana"):
         if not token_info:
              raise HTTPException(status_code=404, detail="Token info not found")
              
-        # Mock SNA result from token info (since we need dataframe for batch, we do single extraction here)
-        # For simplicity reusing SNA logic requires a dataframe, lets make a temp one
-        # Or just trust the fast SNA score passed from frontend if available, 
-        # but let's do a quick recalc or use default
-        sna_score = 50 # Default if full scan not run
+        # Mock SNA result or use batch if available
+        sna_score = 50 
         
         # 3. Model Training / Inference
-        model_key = token_info.get('baseToken', {}).get('symbol', address)
+        token_symbol = token_info.get('baseToken', {}).get('symbol', 'UNKNOWN')
+        # Create a unique key for caching that includes the model type
+        model_key = f"{token_symbol}_{model}"
         
-        # Check if we have a trained model
+        # Check if we have a trained model for this specific architecture
         if model_key in lstm_models:
-             model = lstm_models[model_key]
+             predictor = lstm_models[model_key]
         else:
              # Train new model
-             model, _ = train_model(hist_data, epochs=100)
-             lstm_models[model_key] = model
+             print(f"[API] Training new {model} model for {token_symbol}...")
+             predictor, _ = train_model(hist_data, epochs=100, model_type=model)
+             lstm_models[model_key] = predictor
              
         # 4. Predict
-        prediction = predict_pump_time(model, hist_data, sna_score)
+        prediction = predict_pump_time(predictor, hist_data, sna_score)
         
         return {
-            "token": model_key,
+            "token": token_symbol,
             "address": address,
             "prediction": prediction,
             "last_price": hist_data['close'].iloc[-1],
+            "model_type": model,
             "analysis_timestamp": datetime.now().isoformat()
         }
         
     except Exception as e:
         print(f"Error in prediction: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
