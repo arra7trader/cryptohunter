@@ -238,11 +238,9 @@ async def get_tokens(refresh: bool = False):
     """Get list of hot tokens"""
     # Auto refresh if stale (> 30s)
     if refresh or (time.time() - data_cache.last_update > 30):
-        # Run in background if not forced to wait, but for now we wait if it's the first time
-        if not data_cache.market_data:
-             update_market_cache()
-        else:
-             threading.Thread(target=update_market_cache).start()
+        # ALWAYS Run in background to prevent blocking
+        # Frontend handles empty/stale state
+        threading.Thread(target=update_market_cache).start()
     
     with cache_lock:
         return data_cache.market_data

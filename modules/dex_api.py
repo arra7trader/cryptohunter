@@ -87,77 +87,56 @@ class DexScreenerAPI:
     def search_new_pairs(self, chain: str = "all", min_liquidity: float = 1000) -> pd.DataFrame:
         """
         Mencari pair baru/trending dari DexScreener
-        Optimized: Menggunakan Batch Requests untuk kecepatan tinggi.
+        FAST MODE: Prioritas Search Endpoint (Langsung dapat data).
         """
-        print(f"{Fore.CYAN}[INFO] Mencari pair baru dari DexScreener (Batch Optimized)...{Style.RESET_ALL}")
-        
-        # Endpoint untuk mendapatkan boosted/trending tokens
-        endpoint = "/token-boosts/latest/v1"
-        data = self._make_request(endpoint)
-        
-        raw_candidates = []
-        
-        if data and isinstance(data, list):
-            # 1. Kumpulkan kandidat dari Boosted
-            for item in data[:60]:  # Ambil 60 kandidat
-                raw_candidates.append({
-                    "address": item.get("tokenAddress"),
-                    "chain": item.get("chainId")
-                })
-        
-        if not raw_candidates:
-             # Fallback ke search
-             endpoint = "/latest/dex/search"
-             data = self._make_request(endpoint, params={"q": "pump"})
-             if data and "pairs" in data:
-                 # Search return langsung pair details, jadi bisa langsung parse
-                 pairs_list = [self._parse_pair(p) for p in data["pairs"][:60]]
-                 return self._filter_pairs(pairs_list, min_liquidity)
-        
-        # 2. Batch Processing untuk detail pair
-        # Group by chain
-        from collections import defaultdict
-        chain_groups = defaultdict(list)
-        for c in raw_candidates:
-            if c["address"] and c["chain"]:
-                chain_groups[c["chain"]].append(c["address"])
+        print(f"{Fore.CYAN}[INFO] Fast Scanning DexScreener...{Style.RESET_ALL}")
         
         pairs_list = []
         
-        # Request per chain (Batch 30)
-        for chain_id, addresses in chain_groups.items():
-            # Chunk into 30
-            for i in range(0, len(addresses), 30):
-                chunk = addresses[i:i+30]
-                addr_str = ",".join(chunk)
-                
-                # Fetch pairs pairs/{chainId}/{pairAddresses}
-                # Catatan: Endpoint ini untuk PAIR addresses, tapi boosts return TOKEN addresses.
-                # Kita harus pakai endpoint /tokens/v1/{chainId}/{tokenAddresses} jika ada, 
-                # tapi DexScreener docs bilang /tokens/v1/{chainId}/{tokenAddress} (singular).
-                # TAPI, endpoint /pairs/{chainId}/{pairAddresses} support multi.
-                # Boosts return tokenAddress. Kita butuh fetch pair by token address.
-                # Sayangnya endpoint /tokens/v1/{chainId}/{tokenAddress} sepertinya singular.
-                # Mari kita coba trik: search endpoint juga agak terbatas.
-                
-                # SOLUSI TERBAIK: 
-                # Endpoint /tokens/v1/{chainId}/{tokenAddress} sepertinya tidak support comma (multi).
-                # Tapi kita bisa parallelize requests ini dengan ThreadPoolExecutor
-                # karena ini IO bound.
+        # 1. FASTEST: Search Endpoint (Returns full pair objects)
+        # We query for popular terms to get a mix of trending/new
+        queries = ["solana", "meme", "pump"]
+        
+        import concurrent.futures
+        
+        def fetch_search(q):
+            try:
+                data = self._make_request("/latest/dex/search", params={"q": q})
+                if data and "pairs" in data:
+                    return [self._parse_pair(p) for p in data["pairs"][:20]]
+            except:
                 pass
+            return []
 
-        # Since batching by token address isn't natively documented as multi-fetch for the 'tokens' endpoint,
-        # we will switch to ThreadPoolExecutor to blast requests concurrently instead of serially.
-        # This honors the "show all quickly" requirement.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            results = list(executor.map(fetch_search, queries))
+            for r in results:
+                pairs_list.extend(r)
         
-        pairs_list = self._fetch_details_concurrently(raw_candidates)
+        # Remove duplicates
+        seen = set()
+        unique_pairs = []
+        for p in pairs_list:
+            if p['pair_address'] not in seen:
+                seen.add(p['pair_address'])
+                unique_pairs.append(p)
         
-        # Jika masih kosong/sedikit, tambah dari profiles (juga concurrent)
-        if len(pairs_list) < 5:
-            more_candidates = self._get_trending_candidates_from_profiles()
-            pairs_list.extend(self._fetch_details_concurrently(more_candidates))
-
-        df = pd.DataFrame(pairs_list)
+        # 2. If result is too small, try Boosts (Slower)
+        if len(unique_pairs) < 10:
+            print(f"{Fore.YELLOW}[INFO] Fast search yielded few results. Trying Boosts...{Style.RESET_ALL}")
+            endpoint = "/token-boosts/latest/v1"
+            data = self._make_request(endpoint)
+            
+            raw_candidates = []
+            if data and isinstance(data, list):
+                for item in data[:30]:
+                     raw_candidates.append({"address": item.get("tokenAddress"), "chain": item.get("chainId")})
+            
+            # Fetch details for boosts
+            boosted_pairs = self._fetch_details_concurrently(raw_candidates)
+            unique_pairs.extend(boosted_pairs)
+            
+        df = pd.DataFrame(unique_pairs)
         return self._filter_pairs(df, min_liquidity)
 
     def _filter_pairs(self, df_or_list, min_liquidity):
