@@ -1,7 +1,13 @@
 """
-Indodax AI Forecaster V1.0
+Indodax AI Forecaster V2.0
 ==========================
 Multi-Model Deep Learning untuk prediksi harga crypto Indodax
+
+Data Sources:
+- Binance (primary, 1000+ candles)
+- CryptoCompare (backup)
+- CoinGecko (additional)
+- Indodax (Indonesian market)
 
 Models:
 1. LSTM - Long Short-Term Memory
@@ -11,6 +17,7 @@ Models:
 5. Transformer - Attention-based model (Time-GPT style)
 
 Ensemble averaging untuk akurasi maksimal
+Higher epochs (100-200) untuk training lebih baik
 """
 
 import numpy as np
@@ -24,6 +31,18 @@ import time
 import requests
 
 warnings.filterwarnings('ignore')
+
+# Import data aggregator
+try:
+    from modules.crypto_data_aggregator import CryptoDataAggregator, get_aggregated_data
+    AGGREGATOR_AVAILABLE = True
+except ImportError:
+    try:
+        from crypto_data_aggregator import CryptoDataAggregator, get_aggregated_data
+        AGGREGATOR_AVAILABLE = True
+    except ImportError:
+        AGGREGATOR_AVAILABLE = False
+        print("[WARNING] Data aggregator not available, using Indodax only")
 
 # ML Libraries
 try:
@@ -39,6 +58,7 @@ try:
     from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
     from sklearn.preprocessing import MinMaxScaler, RobustScaler
     from sklearn.model_selection import train_test_split
+    from sklearn.metrics import mean_absolute_error, mean_squared_error
     TF_AVAILABLE = True
 except ImportError:
     TF_AVAILABLE = False
@@ -66,10 +86,13 @@ class ForecastResult:
     change_4h_pct: float
     change_24h_pct: float
     signal: ForecastSignal
-    confidence: float
+    accuracy: float  # Changed from confidence to accuracy
     model_scores: Dict[str, float]
+    model_accuracies: Dict[str, float]  # Individual model accuracies
     risk_level: str
     recommendation: str
+    data_sources: List[str]  # Sources used for training
+    total_candles: int  # Total data points used
 
 
 class IndodaxHistoricalAPI:
@@ -404,8 +427,8 @@ class DeepLearningForecaster:
         
         return np.array(X), np.array(y)
     
-    def train(self, df: pd.DataFrame, epochs: int = 50, batch_size: int = 32) -> Dict:
-        """Train all models"""
+    def train(self, df: pd.DataFrame, epochs: int = 100, batch_size: int = 32) -> Dict:
+        """Train all models with higher epochs for better accuracy"""
         if not TF_AVAILABLE:
             return {"status": "error", "message": "TensorFlow not available"}
         
@@ -413,7 +436,7 @@ class DeepLearningForecaster:
         if len(df) < min_required:
             return {"status": "error", "message": f"Insufficient data: need {min_required}, got {len(df)}"}
         
-        print(f"[AI-FORECAST] Training ensemble on {len(df)} data points...")
+        print(f"[AI-FORECAST] Training ensemble on {len(df)} data points with {epochs} epochs...")
         
         try:
             # Prepare data
@@ -422,17 +445,17 @@ class DeepLearningForecaster:
             if len(X) < 5:
                 return {"status": "error", "message": f"Not enough sequences: {len(X)}"}
             
-            # Split data
+            # Split data - 80% train, 20% validation
             X_train, X_val, y_train, y_val = train_test_split(
                 X, y, test_size=0.2, shuffle=False
             )
             
             input_shape = (X.shape[1], X.shape[2])
             
-            # Callbacks
+            # Callbacks - more patience for higher epochs
             callbacks = [
-                EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True),
-                ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5)
+                EarlyStopping(monitor='val_loss', patience=20, restore_best_weights=True),
+                ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=10)
             ]
             
             # Train each model
@@ -445,6 +468,7 @@ class DeepLearningForecaster:
             }
             
             accuracies = {}
+            val_predictions = {}
             
             for name, builder in model_builders.items():
                 print(f"   > Training {name.upper()}...")
@@ -461,23 +485,38 @@ class DeepLearningForecaster:
                 
                 self.models[name] = model
                 
-                # Calculate accuracy (1 - MAE normalized)
-                val_mae = min(history.history['val_mae'])
-                accuracy = max(0, min(99, (1 - val_mae) * 100))
-                accuracies[name] = accuracy
+                # Calculate REAL accuracy using validation set
+                y_pred = model.predict(X_val, verbose=0)
+                
+                # Inverse transform predictions
+                y_pred_inv = self.scalers['target'].inverse_transform(y_pred.reshape(-1, 1)).flatten()
+                y_val_inv = self.scalers['target'].inverse_transform(y_val.reshape(-1, 1)).flatten()
+                
+                # Calculate MAPE (Mean Absolute Percentage Error)
+                # Accuracy = 100 - MAPE
+                mape = np.mean(np.abs((y_val_inv - y_pred_inv) / (y_val_inv + 1e-10))) * 100
+                accuracy = max(0, min(99.9, 100 - mape))
+                
+                accuracies[name] = round(accuracy, 2)
+                val_predictions[name] = y_pred
                 
                 self.training_history[name] = history.history
+                
+                print(f"      {name.upper()} accuracy: {accuracy:.2f}%")
             
             self.is_trained = True
+            self.model_accuracies = accuracies
             
             avg_accuracy = np.mean(list(accuracies.values()))
-            print(f"[AI-FORECAST] Ensemble trained! Avg accuracy: {avg_accuracy:.1f}%")
+            print(f"[AI-FORECAST] Ensemble trained! Average accuracy: {avg_accuracy:.2f}%")
             
             return {
                 "status": "success",
                 "accuracies": accuracies,
-                "avg_accuracy": avg_accuracy,
-                "samples": len(X)
+                "avg_accuracy": round(avg_accuracy, 2),
+                "samples": len(X),
+                "train_samples": len(X_train),
+                "val_samples": len(X_val)
             }
             
         except Exception as e:
@@ -525,7 +564,8 @@ class DeepLearningForecaster:
             return {
                 "ensemble": ensemble_pred,
                 "individual": predictions,
-                "confidence": confidence
+                "confidence": confidence,
+                "model_accuracies": getattr(self, 'model_accuracies', {})
             }
             
         except Exception as e:
@@ -536,42 +576,84 @@ class DeepLearningForecaster:
 class IndodaxAIForecaster:
     """
     Main class for Indodax AI forecasting
+    Uses multi-source data aggregator for big data training
     """
     
     def __init__(self):
         self.historical_api = IndodaxHistoricalAPI()
-        self.forecaster = DeepLearningForecaster(lookback=15, forecast_horizon=6)
+        self.forecaster = DeepLearningForecaster(lookback=30, forecast_horizon=12)
         self.trained_pairs = {}  # Cache trained models per pair
         self.last_predictions = {}  # Cache predictions
-        self.cache_duration = 300  # 5 minutes cache
+        self.cache_duration = 600  # 10 minutes cache (longer because training takes time)
+        
+        # Initialize data aggregator
+        if AGGREGATOR_AVAILABLE:
+            self.data_aggregator = CryptoDataAggregator()
+            print("[AI] Multi-source data aggregator initialized")
+        else:
+            self.data_aggregator = None
+            print("[AI] Using Indodax data only")
     
     def train_for_pair(self, pair: str) -> Dict:
-        """Train model for a specific pair"""
-        print(f"[AI] Training model for {pair}...")
+        """Train model for a specific pair using aggregated big data"""
+        symbol = pair.replace('_idr', '').upper()
+        print(f"\n[AI] ====== Training AI Model for {symbol} ======")
         
-        # Get historical trades
-        trades_df = self.historical_api.get_trades_history(pair, limit=1000)
+        ohlcv = None
+        sources_used = []
+        total_candles = 0
         
-        if trades_df.empty:
-            return {"status": "error", "message": "No historical data"}
+        # Try to get big data from aggregator first
+        if self.data_aggregator:
+            print(f"[AI] Fetching big data from multiple sources...")
+            try:
+                aggregated = self.data_aggregator.aggregate_data(symbol, interval='1h')
+                
+                if aggregated.total_candles >= 100:
+                    ohlcv = aggregated.ohlcv
+                    sources_used = aggregated.sources_used
+                    total_candles = aggregated.total_candles
+                    print(f"[AI] Got {total_candles} candles from: {', '.join(sources_used)}")
+            except Exception as e:
+                print(f"[AI] Aggregator error: {e}")
         
-        # Generate OHLCV - use 1min interval for more candles
-        ohlcv = self.historical_api.generate_ohlcv_from_trades(trades_df, interval='1min')
+        # Fallback to Indodax if aggregator failed or not enough data
+        if ohlcv is None or len(ohlcv) < 100:
+            print(f"[AI] Falling back to Indodax data...")
+            trades_df = self.historical_api.get_trades_history(pair, limit=1000)
+            
+            if trades_df.empty:
+                return {"status": "error", "message": "No historical data from any source"}
+            
+            ohlcv = self.historical_api.generate_ohlcv_from_trades(trades_df, interval='1min')
+            sources_used = ['Indodax']
+            total_candles = len(ohlcv)
         
-        print(f"[AI] Generated {len(ohlcv)} OHLCV candles")
+        if ohlcv is None or len(ohlcv) < 50:
+            return {"status": "error", "message": f"Insufficient data: only {len(ohlcv) if ohlcv is not None else 0} candles"}
         
-        # Minimum 30 candles needed
-        if len(ohlcv) < 30:
-            return {"status": "error", "message": f"Insufficient OHLCV data: only {len(ohlcv)} candles"}
+        print(f"[AI] Training with {len(ohlcv)} candles...")
         
-        # Train
-        result = self.forecaster.train(ohlcv, epochs=30, batch_size=8)
+        # Determine epochs based on data size
+        if len(ohlcv) >= 500:
+            epochs = 150  # More data = more epochs
+        elif len(ohlcv) >= 200:
+            epochs = 100
+        else:
+            epochs = 50
+        
+        # Train with higher epochs
+        result = self.forecaster.train(ohlcv, epochs=epochs, batch_size=16)
         
         if result.get('status') == 'success':
             self.trained_pairs[pair] = {
                 'trained_at': time.time(),
-                'accuracy': result.get('avg_accuracy', 0)
+                'accuracy': result.get('avg_accuracy', 0),
+                'accuracies': result.get('accuracies', {}),
+                'sources': sources_used,
+                'total_candles': total_candles
             }
+            print(f"[AI] ====== Training Complete! Accuracy: {result.get('avg_accuracy', 0):.2f}% ======\n")
         
         return result
     
@@ -589,13 +671,32 @@ class IndodaxAIForecaster:
             if train_result.get('status') != 'success':
                 return None
         
-        # Get latest data for prediction
-        trades_df = self.historical_api.get_trades_history(pair, limit=500)
-        if trades_df.empty:
-            return None
+        # Get training info
+        training_info = self.trained_pairs.get(pair, {})
+        accuracy = training_info.get('accuracy', 0)
+        model_accuracies = training_info.get('accuracies', {})
+        data_sources = training_info.get('sources', ['Indodax'])
+        total_candles = training_info.get('total_candles', 0)
         
-        ohlcv = self.historical_api.generate_ohlcv_from_trades(trades_df, interval='1min')
-        if ohlcv.empty:
+        # Get latest data for prediction (use aggregated if available)
+        symbol = pair.replace('_idr', '').upper()
+        ohlcv = None
+        
+        if self.data_aggregator:
+            try:
+                aggregated = self.data_aggregator.aggregate_data(symbol, interval='1h')
+                if aggregated.total_candles >= 30:
+                    ohlcv = aggregated.ohlcv
+            except:
+                pass
+        
+        if ohlcv is None or ohlcv.empty:
+            trades_df = self.historical_api.get_trades_history(pair, limit=500)
+            if trades_df.empty:
+                return None
+            ohlcv = self.historical_api.generate_ohlcv_from_trades(trades_df, interval='1min')
+        
+        if ohlcv is None or ohlcv.empty:
             return None
         
         # Predict
@@ -605,49 +706,58 @@ class IndodaxAIForecaster:
             return None
         
         ensemble_pred = pred_result['ensemble']
-        confidence = pred_result['confidence']
+        
+        # Get the last known price from training data (in USD if from external source)
+        # This is the price scale used by the model
+        last_model_price = float(ohlcv['close'].iloc[-1])
         
         # Extract predictions at different horizons
-        # Assuming 1-min intervals: 1h=60, 4h=240, 24h=1440 (but we predict 12 steps)
-        # Scale predictions relative to current price
-        pred_1h = ensemble_pred[min(5, len(ensemble_pred)-1)]  # ~5 steps ahead
-        pred_4h = ensemble_pred[min(10, len(ensemble_pred)-1)]  # ~10 steps ahead  
-        pred_24h = ensemble_pred[-1]  # Last prediction
+        pred_1h_usd = ensemble_pred[min(3, len(ensemble_pred)-1)]
+        pred_4h_usd = ensemble_pred[min(7, len(ensemble_pred)-1)]
+        pred_24h_usd = ensemble_pred[-1]
         
-        # Calculate changes
-        change_1h = ((pred_1h - current_price) / current_price) * 100
-        change_4h = ((pred_4h - current_price) / current_price) * 100
-        change_24h = ((pred_24h - current_price) / current_price) * 100
+        # Calculate percentage changes based on model's price scale
+        # This works regardless of currency (USD or IDR)
+        change_1h = ((pred_1h_usd - last_model_price) / last_model_price) * 100
+        change_4h = ((pred_4h_usd - last_model_price) / last_model_price) * 100
+        change_24h = ((pred_24h_usd - last_model_price) / last_model_price) * 100
         
-        # Determine signal
+        # Convert predictions to IDR using current_price
+        # pred_idr = current_price * (1 + change_pct/100)
+        pred_1h = current_price * (1 + change_1h / 100)
+        pred_4h = current_price * (1 + change_4h / 100)
+        pred_24h = current_price * (1 + change_24h / 100)
+        
+        # Determine signal based on prediction and accuracy
         avg_change = (change_1h + change_4h + change_24h) / 3
         
-        if avg_change > 10 and confidence > 70:
+        if avg_change > 10 and accuracy > 80:
             signal = ForecastSignal.STRONG_BUY
             risk = "HIGH"
-            rec = "🔥 STRONG BUY - AI predicts significant pump!"
-        elif avg_change > 5:
+            rec = f"🔥 STRONG BUY - AI ({accuracy:.1f}% accuracy) predicts significant pump!"
+        elif avg_change > 5 and accuracy > 70:
             signal = ForecastSignal.BUY
             risk = "MEDIUM"
-            rec = "📈 BUY - Positive momentum expected"
-        elif avg_change < -10 and confidence > 70:
+            rec = f"📈 BUY - Positive momentum expected (Accuracy: {accuracy:.1f}%)"
+        elif avg_change < -10 and accuracy > 80:
             signal = ForecastSignal.STRONG_SELL
             risk = "HIGH"
-            rec = "⚠️ STRONG SELL - AI predicts dump!"
-        elif avg_change < -5:
+            rec = f"⚠️ STRONG SELL - AI ({accuracy:.1f}% accuracy) predicts dump!"
+        elif avg_change < -5 and accuracy > 70:
             signal = ForecastSignal.SELL
             risk = "MEDIUM"
-            rec = "📉 SELL - Negative trend expected"
+            rec = f"📉 SELL - Negative trend expected (Accuracy: {accuracy:.1f}%)"
         else:
             signal = ForecastSignal.HOLD
             risk = "LOW"
-            rec = "➡️ HOLD - No clear direction"
+            rec = f"➡️ HOLD - No clear direction (Accuracy: {accuracy:.1f}%)"
         
-        # Model scores
+        # Model scores (predicted % change based on model's scale)
         model_scores = {}
         for name, preds in pred_result.get('individual', {}).items():
             last_pred = preds[-1]
-            model_change = ((last_pred - current_price) / current_price) * 100
+            # Use model's price scale for accurate % change
+            model_change = ((last_pred - last_model_price) / last_model_price) * 100
             model_scores[name] = float(round(model_change, 2))
         
         result = ForecastResult(
@@ -660,10 +770,13 @@ class IndodaxAIForecaster:
             change_4h_pct=float(round(change_4h, 2)),
             change_24h_pct=float(round(change_24h, 2)),
             signal=signal,
-            confidence=float(round(confidence, 1)),
+            accuracy=float(round(accuracy, 2)),  # Real accuracy
             model_scores=model_scores,
+            model_accuracies={k: float(round(v, 2)) for k, v in model_accuracies.items()},
             risk_level=risk,
-            recommendation=rec
+            recommendation=rec,
+            data_sources=data_sources,
+            total_candles=total_candles
         )
         
         # Cache result
@@ -684,10 +797,13 @@ class IndodaxAIForecaster:
             'change_24h_pct': float(result.change_24h_pct),
             'signal': str(result.signal.value),
             'signal_type': str(result.signal.name),
-            'confidence': float(result.confidence),
+            'accuracy': float(result.accuracy),  # Real accuracy instead of confidence
             'model_scores': {k: float(v) for k, v in result.model_scores.items()},
+            'model_accuracies': {k: float(v) for k, v in result.model_accuracies.items()},
             'risk_level': str(result.risk_level),
-            'recommendation': str(result.recommendation)
+            'recommendation': str(result.recommendation),
+            'data_sources': result.data_sources,
+            'total_candles': int(result.total_candles)
         }
 
 

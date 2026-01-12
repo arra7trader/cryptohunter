@@ -493,6 +493,19 @@ export default function Home() {
                   </div>
                   
                   <div className="p-6">
+                    {/* Data Sources Info */}
+                    <div className="flex items-center gap-2 mb-4 text-xs">
+                      <span className="text-slate-500">Data Sources:</span>
+                      {aiForecast.data_sources?.map((source, i) => (
+                        <span key={i} className="px-2 py-1 bg-cyan-500/20 text-cyan-400 rounded">
+                          {source}
+                        </span>
+                      ))}
+                      <span className="text-slate-500 ml-2">
+                        ({aiForecast.total_candles?.toLocaleString()} candles)
+                      </span>
+                    </div>
+
                     <div className="grid grid-cols-3 gap-4 mb-6">
                       <div className="p-4 rounded-xl bg-slate-800/50 text-center">
                         <p className="text-sm text-slate-400 mb-1">Predicted 1H</p>
@@ -518,12 +531,16 @@ export default function Home() {
                     </div>
 
                     <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-4">
-                        <div>
-                          <p className="text-sm text-slate-400">Confidence</p>
-                          <p className="text-2xl font-bold text-violet-400">{aiForecast.confidence?.toFixed(0)}%</p>
+                      <div className="flex items-center gap-6">
+                        <div className="text-center">
+                          <p className="text-sm text-slate-400">Model Accuracy</p>
+                          <p className={`text-3xl font-bold ${
+                            aiForecast.accuracy >= 85 ? 'text-emerald-400' :
+                            aiForecast.accuracy >= 70 ? 'text-cyan-400' :
+                            aiForecast.accuracy >= 50 ? 'text-yellow-400' : 'text-rose-400'
+                          }`}>{aiForecast.accuracy?.toFixed(1)}%</p>
                         </div>
-                        <div>
+                        <div className="text-center">
                           <p className="text-sm text-slate-400">Risk Level</p>
                           <p className={`text-lg font-bold ${
                             aiForecast.risk_level === 'HIGH' ? 'text-rose-400' :
@@ -534,7 +551,7 @@ export default function Home() {
                     </div>
 
                     <div className="p-4 rounded-xl bg-slate-800/30 mb-4">
-                      <p className="text-sm text-slate-400 mb-2">Model Predictions (% Change)</p>
+                      <p className="text-sm text-slate-400 mb-2">Model Predictions & Accuracy</p>
                       <div className="grid grid-cols-5 gap-2">
                         {aiForecast.model_scores && Object.entries(aiForecast.model_scores).map(([model, score]) => (
                           <div key={model} className="p-2 rounded-lg bg-slate-800/50 text-center">
@@ -542,6 +559,11 @@ export default function Home() {
                             <p className={`font-mono font-bold ${score >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                               {score >= 0 ? '+' : ''}{score?.toFixed(2)}%
                             </p>
+                            {aiForecast.model_accuracies && (
+                              <p className="text-xs text-cyan-400 mt-1">
+                                Acc: {aiForecast.model_accuracies[model]?.toFixed(1)}%
+                              </p>
+                            )}
                           </div>
                         ))}
                       </div>
