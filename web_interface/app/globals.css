@@ -60,33 +60,50 @@
   }
 }
 
-/* Glass Effects */
+/* Glass Effects - Using pure CSS instead of @apply */
 .glass-effect {
-  @apply bg-white/10 backdrop-blur-lg border border-white/10;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .glass-card {
-  @apply bg-slate-900/40 backdrop-blur-md border border-white/5 shadow-xl;
   background: linear-gradient(135deg, rgba(15, 23, 42, 0.8) 0%, rgba(30, 41, 59, 0.4) 100%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
 }
 
 .glass-card-hover {
-  @apply glass-card transition-all duration-300;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.8) 0%, rgba(30, 41, 59, 0.4) 100%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  transition: all 0.3s ease;
 }
 
 .glass-card-hover:hover {
-  @apply border-cyan-500/30 shadow-cyan-500/10;
+  border-color: rgba(6, 182, 212, 0.3);
   transform: translateY(-2px);
   box-shadow: 0 20px 40px -12px rgba(6, 182, 212, 0.15);
 }
 
 /* Text Effects */
 .text-gradient {
-  @apply bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600;
+  background: linear-gradient(to right, #22d3ee, #3b82f6, #9333ea);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .text-gradient-gold {
-  @apply bg-clip-text text-transparent bg-gradient-to-r from-yellow-400 via-amber-500 to-orange-500;
+  background: linear-gradient(to right, #facc15, #f59e0b, #f97316);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .text-glow {
@@ -152,6 +169,15 @@
   }
 }
 
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .animate-pulse-glow {
   animation: pulse-glow 2s ease-in-out infinite;
 }
@@ -175,6 +201,10 @@
   animation: border-pulse 2s ease-in-out infinite;
 }
 
+.animate-spin-slow {
+  animation: spin-slow 3s linear infinite;
+}
+
 /* Sparkline Mini Chart */
 .sparkline {
   display: flex;
@@ -194,28 +224,39 @@
   background: linear-gradient(to top, rgba(239, 68, 68, 0.3), rgba(239, 68, 68, 0.8));
 }
 
-/* Status Indicators */
+/* Status Indicators - Pure CSS */
 .status-pump {
-  @apply bg-emerald-500/20 text-emerald-400 border border-emerald-500/30;
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
   box-shadow: 0 0 15px rgba(16, 185, 129, 0.3);
 }
 
 .status-dump {
-  @apply bg-rose-500/20 text-rose-400 border border-rose-500/30;
+  background: rgba(239, 68, 68, 0.2);
+  color: #fb7185;
+  border: 1px solid rgba(239, 68, 68, 0.3);
   box-shadow: 0 0 15px rgba(239, 68, 68, 0.3);
 }
 
 .status-neutral {
-  @apply bg-slate-500/20 text-slate-400 border border-slate-500/30;
+  background: rgba(100, 116, 139, 0.2);
+  color: #94a3b8;
+  border: 1px solid rgba(100, 116, 139, 0.3);
 }
 
 /* Progress Bar */
 .progress-bar {
-  @apply h-1 rounded-full overflow-hidden bg-slate-800;
+  height: 4px;
+  border-radius: 9999px;
+  overflow: hidden;
+  background: rgb(30, 41, 59);
 }
 
 .progress-bar-fill {
-  @apply h-full rounded-full transition-all duration-500;
+  height: 100%;
+  border-radius: 9999px;
+  transition: all 0.5s ease;
   background: linear-gradient(90deg, #06b6d4, #8b5cf6, #06b6d4);
   background-size: 200% 100%;
   animation: shimmer 1.5s linear infinite;
@@ -254,7 +295,10 @@
 
 /* Stat Card */
 .stat-card {
-  @apply relative overflow-hidden rounded-xl p-5;
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  padding: 20px;
   background: linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(30, 41, 59, 0.5) 100%);
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
@@ -271,7 +315,7 @@
 
 /* Token Row Hover */
 .token-row {
-  @apply transition-all duration-200;
+  transition: all 0.2s ease;
 }
 
 .token-row:hover {
@@ -289,64 +333,132 @@
 
 /* Loading States */
 .skeleton {
-  @apply bg-slate-800 rounded animate-pulse;
+  background: rgb(30, 41, 59);
+  border-radius: 8px;
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: .5;
+  }
 }
 
 .skeleton-text {
-  @apply skeleton h-4 w-full;
+  height: 16px;
+  width: 100%;
+  background: rgb(30, 41, 59);
+  border-radius: 8px;
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 .skeleton-circle {
-  @apply skeleton rounded-full;
+  background: rgb(30, 41, 59);
+  border-radius: 9999px;
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 /* Tab Style */
 .tab-item {
-  @apply px-4 py-2 text-sm font-medium text-slate-400 transition-all duration-200 border-b-2 border-transparent;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #94a3b8;
+  transition: all 0.2s ease;
+  border-bottom: 2px solid transparent;
 }
 
 .tab-item:hover {
-  @apply text-slate-200;
+  color: #e2e8f0;
 }
 
 .tab-item.active {
-  @apply text-cyan-400 border-cyan-400;
+  color: #22d3ee;
+  border-bottom-color: #22d3ee;
 }
 
 /* Badge Variants */
 .badge-success {
-  @apply bg-emerald-500/10 text-emerald-400 border border-emerald-500/20;
+  background: rgba(16, 185, 129, 0.1);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.2);
 }
 
 .badge-warning {
-  @apply bg-amber-500/10 text-amber-400 border border-amber-500/20;
+  background: rgba(245, 158, 11, 0.1);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.2);
 }
 
 .badge-danger {
-  @apply bg-rose-500/10 text-rose-400 border border-rose-500/20;
+  background: rgba(239, 68, 68, 0.1);
+  color: #fb7185;
+  border: 1px solid rgba(239, 68, 68, 0.2);
 }
 
 .badge-info {
-  @apply bg-cyan-500/10 text-cyan-400 border border-cyan-500/20;
+  background: rgba(6, 182, 212, 0.1);
+  color: #22d3ee;
+  border: 1px solid rgba(6, 182, 212, 0.2);
 }
 
 /* Tooltip */
 .tooltip {
-  @apply absolute z-50 px-3 py-2 text-xs font-medium text-white bg-slate-900 rounded-lg shadow-lg;
-  @apply border border-slate-700 opacity-0 invisible transition-all duration-200;
+  position: absolute;
+  z-index: 50;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: white;
+  background: rgb(15, 23, 42);
+  border-radius: 8px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  border: 1px solid rgb(51, 65, 85);
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.2s ease;
 }
 
 .tooltip-trigger:hover .tooltip {
-  @apply opacity-100 visible;
+  opacity: 1;
+  visibility: visible;
 }
 
 /* Mobile Responsive */
 @media (max-width: 768px) {
   .glass-card {
-    @apply backdrop-blur-sm;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
   }
   
   .stat-card {
-    @apply p-4;
+    padding: 16px;
   }
+}
+
+/* Utility classes for gradients */
+.bg-gradient-cyber {
+  background: linear-gradient(135deg, #06b6d4 0%, #8b5cf6 50%, #ec4899 100%);
+}
+
+.bg-gradient-dark {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 1) 0%, rgba(30, 41, 59, 1) 100%);
+}
+
+/* Hover scale effect */
+.hover-scale {
+  transition: transform 0.2s ease;
+}
+
+.hover-scale:hover {
+  transform: scale(1.02);
+}
+
+/* Focus ring */
+.focus-ring:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.5);
 }

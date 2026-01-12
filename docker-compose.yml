@@ -6,9 +6,9 @@ services:
       - "8000:8000"
     env_file:
       - .env
-    volumes:
-      - .:/app
-    command: uvicorn main_api:app --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+    networks:
+      - cryptonet
 
   frontend:
     build:
@@ -16,8 +16,15 @@ services:
       dockerfile: Dockerfile
     container_name: cryptohunter-frontend
     ports:
-      - "3005:3000"
+      - "3000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
     depends_on:
       - backend
+    restart: unless-stopped
+    networks:
+      - cryptonet
+
+networks:
+  cryptonet:
+    driver: bridge

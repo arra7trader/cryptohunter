@@ -22,6 +22,9 @@ from collections import defaultdict
 from modules.dex_api import DexScreenerAPI, get_historical_data
 from modules.sna_analyzer import SNAAnalyzer
 from modules.price_predictor import analyze_token_comprehensive
+from modules.pump_predictor import predict_pump_dump, batch_predict
+from modules.indodax_api import IndodaxAPI, get_indodax_market
+from modules.indodax_forecaster import IndodaxAIForecaster, forecast_indodax_token
 from modules.db import db
 
 app = FastAPI(
@@ -49,6 +52,8 @@ app.add_middleware(
 # Global instances
 dex_api = DexScreenerAPI()
 sna_analyzer = SNAAnalyzer()
+indodax_api = IndodaxAPI()
+indodax_forecaster = IndodaxAIForecaster()  # AI Forecaster
 lstm_models = {}
 cache_lock = threading.Lock()
 
@@ -56,6 +61,8 @@ cache_lock = threading.Lock()
 class DataCache:
     def __init__(self):
         self.market_data = []
+        self.indodax_data = []  # Indodax cache
+        self.indodax_last_update = 0
         self.last_update = 0
         self.update_interval = 30  # Update every 30s
         self.is_updating = False
@@ -201,9 +208,9 @@ def update_market_cache():
             
         print(f"[API] Stage 1: Displaying {len(raw_data)} tokens (Raw)")
 
-        # === STAGE 2: ENRICHMENT (SNA + ANALYSIS) ===
-        # Now we process SNA and Logic in the background
-        data_cache.scan_status = "Running SNA & AI Analysis"
+        # === STAGE 2: ENRICHMENT (SNA + ALPHA ANALYSIS) ===
+        # Now we process SNA and Alpha Score in the background
+        data_cache.scan_status = "Running Alpha Hunter V3 Analysis"
         
         sna_results = sna_analyzer.analyze_batch(pairs_df)
         data_cache.scan_progress = 60
@@ -212,44 +219,57 @@ def update_market_cache():
         total_items = len(raw_data)
 
         for i, item in enumerate(raw_data):
-            # Slow down slightly just to show progress or just process
-            # Realistically this is fast, but let's update progress per batch or item
             token_symbol = item['token']
             
             # Find SNA result
-            sna_score = 50
+            sna_result = None
             for r in sna_results:
                 if r.token_symbol == token_symbol:
-                    sna_score = r.sna_score
+                    sna_result = r
                     break
             
-            item['sna_score'] = float(sna_score)
-            
-            # Update AI/Heuristic Prediction
-            vol = item['volume_1h']
-            liq = item['liquidity_usd']
-            conf = 50 + (sna_score * 0.3)
-            
-            if vol / max(1, liq) > 2:
-                conf += 10
-            
-            final_conf = int(min(95, max(40, conf)))
+            if sna_result:
+                # Use Alpha Score V3 (more accurate)
+                item['sna_score'] = float(sna_result.alpha_score)
+                item['buy_pressure'] = float(sna_result.buy_pressure)
+                item['token_age_hours'] = float(sna_result.token_age_hours)
+                item['alpha_rating'] = sna_result.alpha_rating.value if sna_result.alpha_rating else "N/A"
+                item['is_alpha'] = sna_result.is_potential_pump
+                
+                # Confidence is now based on alpha_score (more accurate)
+                final_conf = int(min(95, max(40, sna_result.alpha_score)))
+            else:
+                item['sna_score'] = 50.0
+                item['buy_pressure'] = 50.0
+                item['token_age_hours'] = 999
+                item['alpha_rating'] = "N/A"
+                item['is_alpha'] = False
+                final_conf = 50
             
             item['prediction'] = {
                 "confidence": final_conf,
-                "pump_in_hours": 2 if sna_score > 60 else 6,
-                "source": "sna_fast"
+                "pump_in_hours": 2 if item['sna_score'] > 70 else 6,
+                "source": "alpha_v3"
             }
             
-            if item['price_change_5m'] > 5: item['status'] = "PUMP"
-            elif item['price_change_5m'] < -5: item['status'] = "DUMP"
-            else: item['status'] = "NEUTRAL"
+            # Status based on alpha detection
+            if item.get('is_alpha') and item['sna_score'] >= 70:
+                item['status'] = "PUMP"
+            elif item['price_change_5m'] > 5:
+                item['status'] = "PUMP"
+            elif item['price_change_5m'] < -5:
+                item['status'] = "DUMP"
+            else:
+                item['status'] = "NEUTRAL"
             
             enriched_data.append(item)
             
             # Update progress dynamically between 60 and 90
             current_progress = 60 + int((i / total_items) * 30)
             data_cache.scan_progress = current_progress
+
+        # Sort by alpha_score (highest first)
+        enriched_data.sort(key=lambda x: x.get('sna_score', 0), reverse=True)
 
         # Update Cache AGAIN with Enriched Data
         with cache_lock:
@@ -258,7 +278,7 @@ def update_market_cache():
             data_cache.scan_progress = 100
             data_cache.scan_status = "Idle"
             
-        print(f"[API] Stage 2: Enriched {len(enriched_data)} tokens with SNA")
+        print(f"[API] Stage 2: Enriched {len(enriched_data)} tokens with Alpha V3")
         
     except Exception as e:
         print(f"[API] Error updating cache: {e}")
@@ -526,6 +546,140 @@ async def predict_token(address: str, chain: str = "solana"):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# === PUMP/DUMP PREDICTION ENDPOINT (NEW!) ===
+
+@app.get("/api/tokens/{address}/pump-prediction")
+async def get_pump_prediction(address: str, chain: str = "solana"):
+    """
+    🔮 Pump/Dump Predictor - Predicts price movement in next 1 hour
+    
+    Returns:
+    - signal: STRONG_PUMP, PUMP, NEUTRAL, DUMP, STRONG_DUMP
+    - confidence: 0-100%
+    - predicted_change_pct: Expected % change
+    - key_factors: Why this prediction
+    - entry_suggestion: Trading recommendation
+    - stop_loss_pct: Suggested stop loss
+    - take_profit_pct: Suggested take profit
+    """
+    try:
+        # Get token info from DexScreener
+        token_info = dex_api.get_token_info(address, chain_id=chain)
+        if not token_info:
+            raise HTTPException(status_code=404, detail="Token not found")
+        
+        # Get SNA data if available
+        sna_data = None
+        with cache_lock:
+            for token in data_cache.market_data:
+                if token.get('token_address') == address:
+                    sna_data = {
+                        'alpha_score': token.get('sna_score', 50),
+                        'is_alpha': token.get('is_alpha', False)
+                    }
+                    break
+        
+        # Run pump prediction
+        prediction = predict_pump_dump(token_info, sna_data)
+        
+        token_symbol = token_info.get('baseToken', {}).get('symbol', 'UNKNOWN')
+        current_price = float(token_info.get('priceUsd', 0))
+        
+        return {
+            "token": token_symbol,
+            "address": address,
+            "chain": chain,
+            "current_price": current_price,
+            "prediction": prediction,
+            "analysis_timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        print(f"Error in pump prediction: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/pump-signals")
+async def get_all_pump_signals():
+    """
+    🚀 Get pump/dump signals for ALL cached tokens
+    Sorted by: STRONG_PUMP first, then by confidence
+    
+    Use this to find tokens most likely to pump in 1 hour
+    """
+    try:
+        with cache_lock:
+            tokens = data_cache.market_data.copy()
+        
+        if not tokens:
+            return {"signals": [], "message": "No tokens cached yet"}
+        
+        # Get raw token data from cache and analyze each
+        signals = []
+        
+        for token in tokens:
+            address = token.get('token_address')
+            
+            # Get full token info
+            token_info = dex_api.get_token_info(address, chain_id=token.get('chain', 'solana').lower())
+            
+            if token_info:
+                sna_data = {
+                    'alpha_score': token.get('sna_score', 50),
+                    'is_alpha': token.get('is_alpha', False)
+                }
+                
+                prediction = predict_pump_dump(token_info, sna_data)
+                
+                signals.append({
+                    "token": token.get('token'),
+                    "address": address,
+                    "chain": token.get('chain'),
+                    "current_price": token.get('price_usd'),
+                    "price_change_5m": token.get('price_change_5m'),
+                    "volume_1h": token.get('volume_1h'),
+                    "liquidity": token.get('liquidity_usd'),
+                    **prediction
+                })
+        
+        # Sort by signal strength and confidence
+        signal_order = {
+            'STRONG_PUMP': 0,
+            'PUMP': 1,
+            'NEUTRAL': 2,
+            'DUMP': 3,
+            'STRONG_DUMP': 4
+        }
+        
+        signals.sort(key=lambda x: (
+            signal_order.get(x.get('signal_type', 'NEUTRAL'), 2), 
+            -x.get('confidence', 0)
+        ))
+        
+        # Summary stats
+        pump_count = len([s for s in signals if 'PUMP' in s.get('signal_type', '')])
+        dump_count = len([s for s in signals if 'DUMP' in s.get('signal_type', '')])
+        
+        return {
+            "signals": signals,
+            "summary": {
+                "total_analyzed": len(signals),
+                "pump_signals": pump_count,
+                "dump_signals": dump_count,
+                "neutral": len(signals) - pump_count - dump_count
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        print(f"Error getting pump signals: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 # === WEBSOCKET FOR REAL-TIME UPDATES ===
 
 @app.websocket("/ws")
@@ -564,6 +718,296 @@ async def search_tokens(q: str):
     
     return results[:20]
 
+
+# === INDODAX ENDPOINTS ===
+
+@app.get("/api/indodax/tokens")
+async def get_indodax_tokens(refresh: bool = False, limit: int = 200):
+    """
+    Get Indodax market data with buy/sell signals
+    
+    Returns tokens from Indonesian exchange with:
+    - Price in IDR and USD
+    - 24h change, volume, volatility
+    - Buy/Sell signals based on order book analysis
+    - Buy pressure percentage
+    """
+    try:
+        # Check if refresh needed
+        cache_age = time.time() - data_cache.indodax_last_update
+        
+        if refresh or cache_age > 15 or not data_cache.indodax_data:
+            print("[API] Fetching Indodax data...")
+            data_cache.indodax_data = get_indodax_market()
+            data_cache.indodax_last_update = time.time()
+        
+        return data_cache.indodax_data[:limit]
+        
+    except Exception as e:
+        print(f"[API] Indodax error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/indodax/summary")
+async def get_indodax_summary():
+    """Get Indodax market summary"""
+    try:
+        tokens = data_cache.indodax_data or get_indodax_market()
+        
+        if not tokens:
+            return {
+                "total_tokens": 0,
+                "total_volume_idr": 0,
+                "buy_signals": 0,
+                "sell_signals": 0,
+                "avg_change": 0,
+                "usd_idr_rate": indodax_api.usd_idr_rate
+            }
+        
+        total_volume = sum(t.get('volume_24h_idr', 0) for t in tokens)
+        buy_signals = len([t for t in tokens if 'BUY' in t.get('signal_type', '')])
+        sell_signals = len([t for t in tokens if 'SELL' in t.get('signal_type', '')])
+        avg_change = sum(t.get('change_24h', 0) for t in tokens) / len(tokens) if tokens else 0
+        
+        # Top gainer and loser
+        sorted_by_change = sorted(tokens, key=lambda x: x.get('change_24h', 0), reverse=True)
+        top_gainer = sorted_by_change[0] if sorted_by_change else None
+        top_loser = sorted_by_change[-1] if sorted_by_change else None
+        
+        return {
+            "total_tokens": len(tokens),
+            "total_volume_idr": total_volume,
+            "total_volume_usd": total_volume / indodax_api.usd_idr_rate if indodax_api.usd_idr_rate > 0 else 0,
+            "buy_signals": buy_signals,
+            "sell_signals": sell_signals,
+            "neutral_signals": len(tokens) - buy_signals - sell_signals,
+            "avg_change": round(avg_change, 2),
+            "usd_idr_rate": indodax_api.usd_idr_rate,
+            "top_gainer": {
+                "symbol": top_gainer.get('symbol'),
+                "change": top_gainer.get('change_24h')
+            } if top_gainer else None,
+            "top_loser": {
+                "symbol": top_loser.get('symbol'),
+                "change": top_loser.get('change_24h')
+            } if top_loser else None,
+            "last_update": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        print(f"[API] Indodax summary error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/indodax/token/{symbol}")
+async def get_indodax_token_detail(symbol: str):
+    """Get detailed info for a specific Indodax token"""
+    try:
+        pair_id = f"{symbol.lower()}idr"
+        
+        # Get order book analysis
+        order_analysis = indodax_api.analyze_order_book(pair_id)
+        
+        # Get trade analysis
+        trade_analysis = indodax_api.analyze_trades(pair_id)
+        
+        # Find token in cache
+        token_data = None
+        for t in data_cache.indodax_data:
+            if t.get('symbol', '').upper() == symbol.upper():
+                token_data = t
+                break
+        
+        return {
+            "symbol": symbol.upper(),
+            "pair_id": pair_id,
+            "token_data": token_data,
+            "order_book_analysis": order_analysis,
+            "trade_analysis": trade_analysis,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        print(f"[API] Indodax token detail error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# === AI FORECASTING ENDPOINTS ===
+
+@app.get("/api/indodax/forecast/{symbol}")
+async def get_ai_forecast(symbol: str):
+    """
+    Get AI-powered price forecast for an Indodax token
+    Uses ensemble of LSTM, Bi-LSTM, GRU, Conv1D, Transformer
+    """
+    try:
+        pair_id = f"{symbol.lower()}_idr"
+        
+        # Find current price from cache
+        current_price = None
+        for t in data_cache.indodax_data:
+            if t.get('symbol', '').upper() == symbol.upper():
+                current_price = t.get('price_idr', 0)
+                break
+        
+        if not current_price:
+            # Fetch from API
+            ticker = indodax_api.get_ticker(pair_id.replace('_', ''))
+            if ticker:
+                current_price = float(ticker.get('last', 0))
+        
+        if not current_price:
+            raise HTTPException(status_code=404, detail="Token not found")
+        
+        # Get AI forecast
+        forecast = forecast_indodax_token(pair_id, current_price)
+        
+        if not forecast:
+            raise HTTPException(status_code=500, detail="Forecast failed - insufficient data")
+        
+        return {
+            "success": True,
+            "forecast": forecast,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[API] AI Forecast error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/indodax/forecast-batch")
+async def get_batch_forecast(
+    symbols: str = Query(None, description="Comma-separated symbols"),
+    limit: int = Query(10, description="Number of tokens to forecast")
+):
+    """
+    Get AI forecasts for multiple tokens
+    Returns top potential pump candidates
+    """
+    try:
+        results = []
+        
+        if symbols:
+            symbol_list = [s.strip().upper() for s in symbols.split(',')]
+        else:
+            # Use top volume tokens
+            sorted_tokens = sorted(
+                data_cache.indodax_data, 
+                key=lambda x: x.get('volume_idr', 0), 
+                reverse=True
+            )[:limit]
+            symbol_list = [t.get('symbol', '').upper() for t in sorted_tokens]
+        
+        for symbol in symbol_list[:limit]:
+            try:
+                pair_id = f"{symbol.lower()}_idr"
+                
+                # Find current price
+                current_price = None
+                for t in data_cache.indodax_data:
+                    if t.get('symbol', '').upper() == symbol:
+                        current_price = t.get('price_idr', 0)
+                        break
+                
+                if current_price:
+                    forecast = forecast_indodax_token(pair_id, current_price)
+                    if forecast:
+                        results.append(forecast)
+                        
+            except Exception as e:
+                print(f"[API] Forecast error for {symbol}: {e}")
+                continue
+        
+        # Sort by potential gain
+        results.sort(key=lambda x: x.get('change_24h_pct', 0), reverse=True)
+        
+        # Separate into buy/sell signals
+        buy_signals = [r for r in results if 'BUY' in r.get('signal_type', '')]
+        sell_signals = [r for r in results if 'SELL' in r.get('signal_type', '')]
+        
+        return {
+            "success": True,
+            "total": len(results),
+            "forecasts": results,
+            "buy_signals": buy_signals,
+            "sell_signals": sell_signals,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        print(f"[API] Batch forecast error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/indodax/top-predictions")
+async def get_top_predictions(
+    limit: int = Query(20, description="Number of predictions")
+):
+    """
+    Get top AI pump predictions from Indodax
+    Returns tokens with highest predicted gains
+    """
+    try:
+        # Get high volume tokens
+        sorted_tokens = sorted(
+            data_cache.indodax_data, 
+            key=lambda x: x.get('volume_idr', 0), 
+            reverse=True
+        )[:50]
+        
+        predictions = []
+        
+        for token in sorted_tokens:
+            symbol = token.get('symbol', '').upper()
+            current_price = token.get('price_idr', 0)
+            
+            if not current_price:
+                continue
+                
+            try:
+                pair_id = f"{symbol.lower()}_idr"
+                forecast = forecast_indodax_token(pair_id, current_price)
+                
+                if forecast:
+                    forecast['current_volume_idr'] = token.get('volume_idr', 0)
+                    forecast['change_24h_actual'] = token.get('change_24h', 0)
+                    predictions.append(forecast)
+                    
+            except Exception as e:
+                continue
+        
+        # Sort by predicted gain + confidence
+        predictions.sort(
+            key=lambda x: x.get('change_24h_pct', 0) * (x.get('confidence', 0) / 100),
+            reverse=True
+        )
+        
+        top_buys = [p for p in predictions if 'BUY' in p.get('signal_type', '')][:limit]
+        top_sells = [p for p in predictions if 'SELL' in p.get('signal_type', '')][:limit]
+        
+        return {
+            "success": True,
+            "top_buy_predictions": top_buys,
+            "top_sell_predictions": top_sells,
+            "total_analyzed": len(predictions),
+            "model_info": {
+                "models": ["LSTM", "Bi-LSTM", "GRU", "Conv1D", "Transformer"],
+                "ensemble_type": "Average",
+                "target_accuracy": "90%+"
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        print(f"[API] Top predictions error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # === HEALTH CHECK ===
 
 @app.get("/api/health")
@@ -574,6 +1018,7 @@ async def health_check():
         "timestamp": datetime.now().isoformat(),
         "cache_age_seconds": int(time.time() - data_cache.last_update),
         "tokens_cached": len(data_cache.market_data),
+        "indodax_cached": len(data_cache.indodax_data),
         "is_scanning": data_cache.is_updating
     }
 

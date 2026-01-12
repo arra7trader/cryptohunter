@@ -1,0 +1,36 @@
+services:
+  backend:
+    build: .
+    container_name: cryptohunter-backend-dev
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./main_api.py:/app/main_api.py
+      - ./modules:/app/modules
+    command: uvicorn main_api:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - cryptonet-dev
+
+  frontend:
+    build:
+      context: ./web_interface
+      dockerfile: Dockerfile.dev
+    container_name: cryptohunter-frontend-dev
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    volumes:
+      - ./web_interface/app:/app/app
+      - ./web_interface/components:/app/components
+      - ./web_interface/public:/app/public
+    depends_on:
+      - backend
+    networks:
+      - cryptonet-dev
+
+networks:
+  cryptonet-dev:
+    driver: bridge

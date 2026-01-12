@@ -93,55 +93,77 @@ class DexScreenerAPI:
     def search_new_pairs(self, chain: str = "all", min_liquidity: float = 1000) -> pd.DataFrame:
         """
         Mencari pair baru/trending dari DexScreener
-        FAST MODE: Prioritas Search Endpoint (Langsung dapat data).
+        FAST MODE: Menggunakan Latest Boosts dan Token Profiles untuk mendapatkan koin BARU.
         """
-        print(f"{Fore.CYAN}[INFO] Fast Scanning DexScreener...{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}[INFO] Fast Scanning DexScreener for NEW tokens...{Style.RESET_ALL}")
         
         pairs_list = []
         
-        # 1. FASTEST: Search Endpoint (Returns full pair objects)
-        # We query for popular terms to get a mix of trending/new
-        queries = ["solana", "meme", "pump"]
-        
         import concurrent.futures
         
-        def fetch_search(q):
+        # 1. UTAMA: Get LATEST Boosted Tokens (Biasanya koin baru yang dipromosikan)
+        def fetch_boosts():
             try:
-                data = self._make_request("/latest/dex/search", params={"q": q})
-                if data and "pairs" in data:
-                    return [self._parse_pair(p) for p in data["pairs"][:20]]
+                endpoint = "/token-boosts/latest/v1"
+                data = self._make_request(endpoint)
+                if data and isinstance(data, list):
+                    candidates = []
+                    for item in data[:50]:  # Ambil 50 boosted tokens
+                        candidates.append({
+                            "address": item.get("tokenAddress"),
+                            "chain": item.get("chainId")
+                        })
+                    return self._fetch_details_concurrently(candidates)
+            except:
+                pass
+            return []
+        
+        # 2. Get Token Profiles (Koin dengan social/website = biasanya baru launch)
+        def fetch_profiles():
+            try:
+                endpoint = "/token-profiles/latest/v1"
+                data = self._make_request(endpoint)
+                if data and isinstance(data, list):
+                    candidates = []
+                    for item in data[:50]:
+                        candidates.append({
+                            "address": item.get("tokenAddress"),
+                            "chain": item.get("chainId", "solana")
+                        })
+                    return self._fetch_details_concurrently(candidates)
             except:
                 pass
             return []
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            results = list(executor.map(fetch_search, queries))
-            for r in results:
-                pairs_list.extend(r)
+        # Execute fetchers in parallel - hanya boosts dan profiles
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            future_boosts = executor.submit(fetch_boosts)
+            future_profiles = executor.submit(fetch_profiles)
+            
+            # Collect results
+            try:
+                pairs_list.extend(future_boosts.result(timeout=15))
+            except:
+                pass
+            try:
+                pairs_list.extend(future_profiles.result(timeout=15))
+            except:
+                pass
         
         # Remove duplicates
         seen = set()
         unique_pairs = []
         for p in pairs_list:
-            if p['pair_address'] not in seen:
-                seen.add(p['pair_address'])
+            pair_key = p.get('pair_address') or p.get('base_token_address')
+            if pair_key and pair_key not in seen:
+                seen.add(pair_key)
                 unique_pairs.append(p)
         
-        # 2. If result is too small, try Boosts (Slower)
-        if len(unique_pairs) < 10:
-            print(f"{Fore.YELLOW}[INFO] Fast search yielded few results. Trying Boosts...{Style.RESET_ALL}")
-            endpoint = "/token-boosts/latest/v1"
-            data = self._make_request(endpoint)
-            
-            raw_candidates = []
-            if data and isinstance(data, list):
-                for item in data[:30]:
-                     raw_candidates.append({"address": item.get("tokenAddress"), "chain": item.get("chainId")})
-            
-            # Fetch details for boosts
-            boosted_pairs = self._fetch_details_concurrently(raw_candidates)
-            unique_pairs.extend(boosted_pairs)
-            
+        # Sort by creation time (newest first) if available, then by liquidity
+        unique_pairs.sort(key=lambda x: (x.get('pair_created_at') or 0, x.get('liquidity_usd') or 0), reverse=True)
+        
+        print(f"{Fore.CYAN}[INFO] Found {len(unique_pairs)} unique tokens{Style.RESET_ALL}")
+        
         df = pd.DataFrame(unique_pairs)
         return self._filter_pairs(df, min_liquidity)
 
