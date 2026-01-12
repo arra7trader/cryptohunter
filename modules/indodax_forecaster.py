@@ -731,19 +731,21 @@ class IndodaxAIForecaster:
         # Determine signal based on prediction and accuracy
         avg_change = (change_1h + change_4h + change_24h) / 3
         
-        if avg_change > 10 and accuracy > 80:
+        # Adjusted thresholds for realistic crypto movements
+        # BTC typically moves 1-3% daily, altcoins can move 5-15%
+        if avg_change > 3 and accuracy > 75:
             signal = ForecastSignal.STRONG_BUY
             risk = "HIGH"
             rec = f"🔥 STRONG BUY - AI ({accuracy:.1f}% accuracy) predicts significant pump!"
-        elif avg_change > 5 and accuracy > 70:
+        elif avg_change > 1.5 and accuracy > 70:
             signal = ForecastSignal.BUY
             risk = "MEDIUM"
             rec = f"📈 BUY - Positive momentum expected (Accuracy: {accuracy:.1f}%)"
-        elif avg_change < -10 and accuracy > 80:
+        elif avg_change < -3 and accuracy > 75:
             signal = ForecastSignal.STRONG_SELL
             risk = "HIGH"
             rec = f"⚠️ STRONG SELL - AI ({accuracy:.1f}% accuracy) predicts dump!"
-        elif avg_change < -5 and accuracy > 70:
+        elif avg_change < -1.5 and accuracy > 70:
             signal = ForecastSignal.SELL
             risk = "MEDIUM"
             rec = f"📉 SELL - Negative trend expected (Accuracy: {accuracy:.1f}%)"

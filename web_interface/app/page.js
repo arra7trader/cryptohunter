@@ -17,6 +17,7 @@ export default function Home() {
   const [aiForecast, setAiForecast] = useState(null);
   const [forecastLoading, setForecastLoading] = useState(false);
   const [selectedForecastCoin, setSelectedForecastCoin] = useState(null);
+  const [trainingStatus, setTrainingStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [error, setError] = useState(null);
@@ -71,6 +72,17 @@ export default function Home() {
         }
       } catch (e) {
         console.log("Indodax data not available yet");
+      }
+      
+      // Fetch training status
+      try {
+        const trainingRes = await fetch(`${API_BASE}/api/training/status`);
+        if (trainingRes.ok) {
+          const trainingData = await trainingRes.json();
+          setTrainingStatus(trainingData.status);
+        }
+      } catch (e) {
+        console.log("Training status not available");
       }
       
       setLastUpdate(new Date());
@@ -573,6 +585,99 @@ export default function Home() {
                       <p className="text-violet-300 text-sm">{aiForecast.recommendation}</p>
                     </div>
                   </div>
+                </div>
+              )}
+
+              {/* Auto Training Status Panel */}
+              {trainingStatus && (
+                <div className="glass-card rounded-xl p-4 mb-6 bg-gradient-to-r from-cyan-500/5 to-emerald-500/5 border border-cyan-500/20">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-lg ${trainingStatus.is_running ? 'bg-emerald-500/20' : 'bg-slate-500/20'}`}>
+                        <Cpu className={`h-5 w-5 ${trainingStatus.is_running ? 'text-emerald-400 animate-pulse' : 'text-slate-400'}`} />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-white">Auto Training System</h3>
+                        <p className="text-xs text-slate-400">
+                          {trainingStatus.is_running ? 'Training aktif - model update otomatis' : 'Training tidak aktif'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold ${
+                        trainingStatus.is_running ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-500/20 text-slate-400'
+                      }`}>
+                        <span className={`w-2 h-2 rounded-full ${trainingStatus.is_running ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'}`}></span>
+                        {trainingStatus.is_running ? 'ACTIVE' : 'INACTIVE'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {trainingStatus.current_training && (
+                    <div className="mb-4 p-3 rounded-lg bg-violet-500/10 border border-violet-500/20">
+                      <div className="flex items-center gap-2">
+                        <RefreshCw className="h-4 w-4 text-violet-400 animate-spin" />
+                        <span className="text-violet-300 text-sm">
+                          Now training: <span className="font-bold">{trainingStatus.current_training.toUpperCase()}</span>
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                    <div className="p-3 rounded-lg bg-slate-800/50 text-center">
+                      <p className="text-xs text-slate-500">Training Interval</p>
+                      <p className="text-lg font-bold text-cyan-400">{trainingStatus.training_interval_minutes || 30} min</p>
+                    </div>
+                    <div className="p-3 rounded-lg bg-slate-800/50 text-center">
+                      <p className="text-xs text-slate-500">Trained Today</p>
+                      <p className="text-lg font-bold text-emerald-400">{trainingStatus.total_trained_today || 0}</p>
+                    </div>
+                    <div className="p-3 rounded-lg bg-slate-800/50 text-center">
+                      <p className="text-xs text-slate-500">Queue</p>
+                      <p className="text-lg font-bold text-yellow-400">{trainingStatus.queue?.length || 0}</p>
+                    </div>
+                    <div className="p-3 rounded-lg bg-slate-800/50 text-center">
+                      <p className="text-xs text-slate-500">Total Models</p>
+                      <p className="text-lg font-bold text-violet-400">{Object.keys(trainingStatus.training_results || {}).length}</p>
+                    </div>
+                  </div>
+
+                  {/* Trained Models */}
+                  {Object.keys(trainingStatus.training_results || {}).length > 0 && (
+                    <div className="mb-3">
+                      <p className="text-xs text-slate-500 mb-2">Trained Models:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {Object.entries(trainingStatus.training_results || {}).map(([coin, data]) => (
+                          <span key={coin} className="px-2 py-1 bg-slate-800/50 rounded text-xs flex items-center gap-1">
+                            <span className="text-white font-semibold">{coin.toUpperCase()}</span>
+                            <span className={`${data.accuracy >= 90 ? 'text-emerald-400' : data.accuracy >= 80 ? 'text-cyan-400' : 'text-yellow-400'}`}>
+                              {data.accuracy?.toFixed(1)}%
+                            </span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Queue */}
+                  {trainingStatus.queue?.length > 0 && (
+                    <div>
+                      <p className="text-xs text-slate-500 mb-2">Training Queue:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {trainingStatus.queue.slice(0, 10).map((coin, i) => (
+                          <span key={coin} className="px-2 py-1 bg-yellow-500/10 text-yellow-400 rounded text-xs">
+                            {coin.toUpperCase()}
+                          </span>
+                        ))}
+                        {trainingStatus.queue.length > 10 && (
+                          <span className="px-2 py-1 bg-slate-500/10 text-slate-400 rounded text-xs">
+                            +{trainingStatus.queue.length - 10} more
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

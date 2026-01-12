@@ -25,6 +25,7 @@ from modules.price_predictor import analyze_token_comprehensive
 from modules.pump_predictor import predict_pump_dump, batch_predict
 from modules.indodax_api import IndodaxAPI, get_indodax_market
 from modules.indodax_forecaster import IndodaxAIForecaster, forecast_indodax_token
+from modules.auto_trainer import auto_trainer, start_auto_training, stop_auto_training, get_training_status, force_train_coin
 from modules.db import db
 
 app = FastAPI(
@@ -39,6 +40,9 @@ app = FastAPI(
 @app.on_event("startup")
 async def startup_event():
     db.connect()
+    # Start auto-training in background
+    print("[API] Starting Auto-Trainer in background...")
+    start_auto_training()
 
 # Enable CORS for frontend
 app.add_middleware(
@@ -1021,6 +1025,82 @@ async def health_check():
         "indodax_cached": len(data_cache.indodax_data),
         "is_scanning": data_cache.is_updating
     }
+
+
+# === AUTO-TRAINING ENDPOINTS ===
+
+@app.get("/api/training/status")
+async def training_status():
+    """Get current auto-training status"""
+    try:
+        status = get_training_status()
+        return {
+            "success": True,
+            "status": status,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/training/start")
+async def start_training():
+    """Start auto-training scheduler"""
+    try:
+        result = start_auto_training()
+        return {
+            "success": result,
+            "message": "Auto-training started" if result else "Already running",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/training/stop")
+async def stop_training():
+    """Stop auto-training scheduler"""
+    try:
+        result = stop_auto_training()
+        return {
+            "success": result,
+            "message": "Auto-training stopped",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/training/force/{symbol}")
+async def force_training(symbol: str):
+    """Force train a specific coin immediately"""
+    try:
+        result = force_train_coin(symbol)
+        return {
+            "success": result.get("success", False),
+            "symbol": symbol.upper(),
+            "accuracy": result.get("accuracy"),
+            "error": result.get("error"),
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/training/results")
+async def training_results():
+    """Get all training results"""
+    try:
+        status = get_training_status()
+        return {
+            "success": True,
+            "results": status.get("training_results", {}),
+            "last_trained": status.get("last_trained", {}),
+            "total_trained_today": status.get("total_trained_today", 0),
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn
