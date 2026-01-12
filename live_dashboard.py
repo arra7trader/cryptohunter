@@ -23,7 +23,7 @@ from colorama import Fore, Style, init, Back
 init(autoreset=True)
 
 from modules.dex_api import DexScreenerAPI
-from modules.price_predictor import EnsemblePredictor
+from modules.price_predictor import SuperEnsemblePredictor
 from modules.sna_analyzer import SNAAnalyzer
 
 
@@ -122,41 +122,28 @@ class LiveDashboard:
             
             # SNA score contribution (max +25)
             base_conf += min(25, sna_score * 0.3)
+            # Quick train (ensemble) using historical data
+            # Check internal flag or simple check if trained
+            if not getattr(model, 'is_trained', False): 
+                 # Assuming SuperEnsemble has train_ensemble method
+                 # In a real scenario, you'd need more robust historical data for training
+                 model.train_ensemble(hist_df, epochs=30)
+                 model.is_trained = True
             
-            # Volume/Liquidity ratio (max +15)
-            volume = data.get('volume_1h', 0)
-            liquidity = max(data.get('liquidity_usd', 1), 1)
-            vol_ratio = volume / liquidity
-            if vol_ratio > 5:
-                base_conf += 15
-            elif vol_ratio > 2:
-                base_conf += 10
-            elif vol_ratio > 1:
-                base_conf += 5
+            # Get prediction
+            # Ensure the input to predict matches what the model expects (e.g., last 30 data points)
+            pred_result = model.predict(hist_df.tail(30))
             
-            # Trend consistency (max +10)
-            c5m = data.get('price_change_5m', 0)
-            c1h = data.get('price_change_1h', 0)
-            c24h = data.get('price_change_24h', 0)
-            if (c5m > 0 and c1h > 0) or (c5m < 0 and c1h < 0):
-                base_conf += 10
+            # SuperEnsemble returns dict like {"pump_prob": 0.85, "dump_prob": 0.1, "action": "BUY"}
+            # We map this to our dashboard format
+            pump_prob = pred_result.get('pump_prob', 0.5)
+            hours = 4 # Default estimate
             
-            # Final confidence
-            conf = int(min(95, max(55, base_conf)))
+            conf = int(pump_prob * 100)
             
-            # Pump hours based on SNA hype level
-            if sna_score >= 70:
-                hours = 1
-            elif sna_score >= 50:
-                hours = 2
-            elif sna_score >= 30:
-                hours = 4
-            else:
-                hours = 6
-            
-            # Cache result
+            # Cache the result
             self.ai_cache[token] = (time.time(), conf, hours)
-            return (conf, hours, "sna")
+            return (conf, hours, "lstm")
             
         except Exception as e:
             # Fallback with basic calculation

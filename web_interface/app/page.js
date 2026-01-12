@@ -1,274 +1,340 @@
-
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import DashboardHeader from "@/components/DashboardHeader";
 import TokenTable from "@/components/TokenTable";
+import TrendingPanel from "@/components/TrendingPanel";
+import WatchlistPanel from "@/components/WatchlistPanel";
+import AIAnalysisPanel from "@/components/AIAnalysisPanel";
+import SearchBar from "@/components/SearchBar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Loader2, RefreshCw, Zap, Crosshair } from "lucide-react";
+import { 
+  RefreshCw, Zap, Activity, TrendingUp, 
+  Star, Menu, X, Sparkles, Shield, Cpu, BarChart3
+} from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export default function Home() {
   const [tokens, setTokens] = useState([]);
   const [summary, setSummary] = useState(null);
+  const [trending, setTrending] = useState(null);
+  const [watchlist, setWatchlist] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState(null); // Fix hydration mismatch
+  const [lastUpdate, setLastUpdate] = useState(null);
   const [selectedToken, setSelectedToken] = useState(null);
+  const [activeTab, setActiveTab] = useState("scanner");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sortBy, setSortBy] = useState("volume_1h");
 
-  // Fetch data
-  const fetchData = async () => {
+  // Fetch all data
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const [tokensRes, summaryRes] = await Promise.all([
-        fetch(`${API_BASE}/api/tokens`),
-        fetch(`${API_BASE}/api/market/summary`)
+      const [tokensRes, summaryRes, trendingRes, watchlistRes] = await Promise.all([
+        fetch(`${API_BASE}/api/tokens?sort_by=${sortBy}`),
+        fetch(`${API_BASE}/api/market/summary`),
+        fetch(`${API_BASE}/api/trending`),
+        fetch(`${API_BASE}/api/watchlist`)
       ]);
 
-      if (tokensRes.ok && summaryRes.ok) {
+      if (tokensRes.ok) {
         const tokensData = await tokensRes.json();
-        const summaryData = await summaryRes.json();
         setTokens(Array.isArray(tokensData) ? tokensData : []);
-        setSummary(summaryData);
-        setLastUpdate(new Date());
       }
+      
+      if (summaryRes.ok) {
+        const summaryData = await summaryRes.json();
+        setSummary(summaryData);
+      }
+      
+      if (trendingRes.ok) {
+        const trendingData = await trendingRes.json();
+        setTrending(trendingData);
+      }
+      
+      if (watchlistRes.ok) {
+        const watchlistData = await watchlistRes.json();
+        setWatchlist(Array.isArray(watchlistData) ? watchlistData : []);
+      }
+      
+      setLastUpdate(new Date());
     } catch (error) {
       console.error("Failed to fetch data:", error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [sortBy]);
 
   useEffect(() => {
-    setLastUpdate(new Date()); // Set initial date on client
+    setLastUpdate(new Date());
     fetchData();
     const interval = setInterval(fetchData, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchData]);
 
-  // ... inside return ...
-  // <Badge variant="secondary" className="bg-slate-800 text-slate-400">
-  //   Updated: {lastUpdate ? lastUpdate.toLocaleTimeString() : '...'}
-  // </Badge>
-
-  // const [selectedModel, setSelectedModel] = useState("bilstm"); // Removed
-  const [analysisLoading, setAnalysisLoading] = useState(false);
-
-  // Deep Analysis Function
-  const runDeepAnalysis = async () => {
-    if (!selectedToken) return;
-
+  // Add to watchlist
+  const handleAddToWatchlist = async (token) => {
     try {
-      setAnalysisLoading(true);
-      // No model param needed anymore
-      const res = await fetch(`${API_BASE}/api/tokens/${selectedToken.token_address}/predict?chain=${selectedToken.chain}`);
-
+      const res = await fetch(`${API_BASE}/api/watchlist`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token_address: token.token_address,
+          chain: token.chain
+        })
+      });
       if (res.ok) {
-        const data = await res.json();
-        // Update the selected token with new detailed prediction data
-        setSelectedToken(prev => ({
-          ...prev,
-          prediction: {
-            ...prev.prediction,
-            confidence: data.prediction.ensemble.confidence,
-            pump_in_hours: data.prediction.ensemble.pump_in_hours,
-            source: data.prediction.ensemble.model // e.g., GEM_PATTERN or SUPER_ENSEMBLE
-          },
-          detailed_analysis: data // Store full response if needed
-        }));
-      } else {
-        const errorData = await res.json().catch(() => ({ detail: "Unknown Error" }));
-        console.error("Analysis failed:", errorData);
-        alert(`Analysis failed: ${errorData.detail || "Server Error"}`);
+        fetchData();
       }
     } catch (error) {
-      console.error("Deep analysis error:", error);
-      alert("Network Error: Could not reach backend.");
-    } finally {
-      setAnalysisLoading(false);
+      console.error("Failed to add to watchlist:", error);
     }
   };
 
+  // Remove from watchlist
+  const handleRemoveFromWatchlist = async (address) => {
+    try {
+      await fetch(`${API_BASE}/api/watchlist/${address}`, { method: "DELETE" });
+      fetchData();
+    } catch (error) {
+      console.error("Failed to remove from watchlist:", error);
+    }
+  };
+
+  // Search tokens
+  const filteredTokens = searchQuery 
+    ? tokens.filter(t => 
+        t.token?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        t.token_address?.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : tokens;
+
   return (
-    <main className="min-h-screen p-6 space-y-8 relative overflow-hidden">
-      {/* Background Decor */}
-      <div className="fixed inset-0 z-[-1] bg-[radial-gradient(circle_at_top,_var(--tw-gradient-stops))] from-slate-900 via-[#0a0f1d] to-black"></div>
-      <div className="fixed top-0 left-0 w-full h-[500px] bg-gradient-to-b from-cyan-900/10 to-transparent pointer-events-none"></div>
-
-      {/* Navbar */}
-      <div className="flex items-center justify-between container mx-auto pt-4">
-        <div>
-          <h1 className="text-4xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 flex items-center gap-3 text-glow">
-            <Zap className="text-cyan-400 fill-cyan-400 h-8 w-8" />
-            CRYPTOHUNTER
-            <span className="text-sm font-light text-slate-300 tracking-[0.2em] border-l border-slate-600 pl-3 ml-1">AI SENTINEL V2.1</span>
-          </h1>
-          <p className="text-slate-400 text-sm mt-1 ml-11">Advanced DEX Monitoring & Price Prediction Engine</p>
-        </div>
-        <div className="flex items-center gap-6">
-          <div className="text-right hidden md:block">
-            <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold mb-1">System Status</p>
-            <div className="flex items-center justify-end gap-2 bg-black/30 px-3 py-1 rounded-full border border-emerald-500/20">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <span className="text-xs font-mono text-emerald-400 font-bold tracking-wider">SYSTEM ONLINE</span>
-            </div>
-          </div>
-          <Button variant="outline" size="sm" onClick={fetchData} disabled={loading} className="gap-2 border-slate-700 hover:bg-cyan-500/10 hover:text-cyan-400 hover:border-cyan-500/50 transition-all">
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            Sync Data
-          </Button>
-        </div>
+    <main className="min-h-screen relative overflow-hidden">
+      {/* Animated Background */}
+      <div className="fixed inset-0 z-[-2]">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-[#0a0f1d] to-black"></div>
+        <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-cyan-500/10 rounded-full blur-[120px] animate-pulse"></div>
+        <div className="absolute bottom-0 right-1/4 w-[400px] h-[400px] bg-purple-500/10 rounded-full blur-[100px] animate-pulse" style={{animationDelay: '1s'}}></div>
+        <div className="absolute top-1/2 left-1/2 w-[300px] h-[300px] bg-blue-500/5 rounded-full blur-[80px] animate-float"></div>
       </div>
+      
+      {/* Grid Pattern Overlay */}
+      <div className="fixed inset-0 z-[-1] pattern-grid opacity-30"></div>
 
-      <div className="container mx-auto space-y-8">
-        {/* Summary Cards */}
-        <DashboardHeader data={summary} />
-
-        {/* Main Content Split */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-
-          {/* Left: Token List */}
-          <div className="lg:col-span-2 space-y-5">
-            <div className="flex items-center justify-between px-2">
-              <h2 className="text-lg font-semibold flex items-center gap-3 text-white">
-                <span className="relative flex h-3 w-3">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
-                </span>
-                Live Market Scanner
-              </h2>
-              <Badge variant="secondary" className="bg-slate-900 border border-slate-800 text-slate-400 font-mono">
-                Last Sync: <span className="text-cyan-400 ml-2">{lastUpdate ? lastUpdate.toLocaleTimeString() : '--:--:--'}</span>
+      {/* Top Navigation */}
+      <nav className="sticky top-0 z-50 backdrop-blur-xl bg-slate-900/70 border-b border-white/5">
+        <div className="container mx-auto px-4 py-3">
+          <div className="flex items-center justify-between">
+            {/* Logo */}
+            <div className="flex items-center gap-4">
+              <div className="relative">
+                <div className="absolute -inset-2 bg-gradient-to-r from-cyan-500 to-purple-500 rounded-lg blur opacity-30"></div>
+                <div className="relative flex items-center gap-2 bg-slate-900 px-3 py-2 rounded-lg border border-white/10">
+                  <Zap className="h-6 w-6 text-cyan-400 fill-cyan-400" />
+                  <span className="text-xl font-black text-gradient">CRYPTOHUNTER</span>
+                </div>
+              </div>
+              <Badge className="hidden md:flex bg-gradient-to-r from-purple-500/20 to-cyan-500/20 border-purple-500/30 text-purple-300">
+                <Sparkles className="h-3 w-3 mr-1" /> AI V3.0
               </Badge>
             </div>
-            <TokenTable tokens={tokens} onSelectToken={setSelectedToken} />
-            <p className="text-center text-xs text-slate-400 mt-4">
-              Auto-refreshing every 10s • Syncing with Python Backend (30s cycle)
-            </p>
+
+            {/* Desktop Nav */}
+            <div className="hidden md:flex items-center gap-6">
+              <button 
+                onClick={() => setActiveTab("scanner")}
+                className={`tab-item ${activeTab === "scanner" ? "active" : ""}`}
+              >
+                <Activity className="h-4 w-4 inline mr-2" />
+                Scanner
+              </button>
+              <button 
+                onClick={() => setActiveTab("trending")}
+                className={`tab-item ${activeTab === "trending" ? "active" : ""}`}
+              >
+                <TrendingUp className="h-4 w-4 inline mr-2" />
+                Trending
+              </button>
+              <button 
+                onClick={() => setActiveTab("watchlist")}
+                className={`tab-item ${activeTab === "watchlist" ? "active" : ""}`}
+              >
+                <Star className="h-4 w-4 inline mr-2" />
+                Watchlist
+                {watchlist.length > 0 && (
+                  <span className="ml-2 px-1.5 py-0.5 text-xs bg-cyan-500/20 text-cyan-400 rounded-full">
+                    {watchlist.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* Right Actions */}
+            <div className="flex items-center gap-3">
+              {/* Status Indicator */}
+              <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span className="text-xs font-mono text-emerald-400">LIVE</span>
+              </div>
+
+              {/* Refresh Button */}
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={fetchData} 
+                disabled={loading}
+                className="gap-2 border-slate-700 hover:bg-cyan-500/10 hover:text-cyan-400 hover:border-cyan-500/50"
+              >
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">Sync</span>
+              </Button>
+
+              {/* Mobile Menu Toggle */}
+              <Button 
+                variant="ghost" 
+                size="sm"
+                className="md:hidden"
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              >
+                {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+              </Button>
+            </div>
           </div>
 
-          {/* Right: AI Analysis Panel */}
-          <div className="space-y-5">
-            <h2 className="text-lg font-semibold flex items-center gap-2 text-white px-2">
-              <Zap className="h-5 w-5 text-purple-500" />
-              Sentinel AI Analysis
-            </h2>
+          {/* Mobile Menu */}
+          {mobileMenuOpen && (
+            <div className="md:hidden mt-4 pb-2 border-t border-white/5 pt-4">
+              <div className="flex flex-col gap-2">
+                <button 
+                  onClick={() => { setActiveTab("scanner"); setMobileMenuOpen(false); }}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg ${activeTab === "scanner" ? "bg-cyan-500/20 text-cyan-400" : "text-slate-400"}`}
+                >
+                  <Activity className="h-4 w-4" /> Scanner
+                </button>
+                <button 
+                  onClick={() => { setActiveTab("trending"); setMobileMenuOpen(false); }}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg ${activeTab === "trending" ? "bg-cyan-500/20 text-cyan-400" : "text-slate-400"}`}
+                >
+                  <TrendingUp className="h-4 w-4" /> Trending
+                </button>
+                <button 
+                  onClick={() => { setActiveTab("watchlist"); setMobileMenuOpen(false); }}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg ${activeTab === "watchlist" ? "bg-cyan-500/20 text-cyan-400" : "text-slate-400"}`}
+                >
+                  <Star className="h-4 w-4" /> Watchlist ({watchlist.length})
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </nav>
 
-            <Card className="min-h-[500px] border-0 glass-card relative overflow-hidden group">
-              {/* Decorative background elements for the card */}
-              <div className="absolute top-0 right-0 w-32 h-32 bg-purple-500/10 blur-[50px] rounded-full pointer-events-none"></div>
-              <div className="absolute bottom-0 left-0 w-32 h-32 bg-blue-500/10 blur-[50px] rounded-full pointer-events-none"></div>
+      {/* Main Content */}
+      <div className="container mx-auto px-4 py-6 space-y-6">
+        
+        {/* Stats Dashboard */}
+        <DashboardHeader data={summary} trending={trending} />
 
-              {selectedToken ? (
-                <>
-                  <CardHeader className="relative z-10 border-b border-white/5 pb-2">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="flex items-center gap-2 mb-2">
-                          <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/30 hover:bg-blue-500/30">{selectedToken.chain}</Badge>
-                          <span className="text-xs text-slate-400 font-mono">{selectedToken.token_address}</span>
-                        </div>
-                        <CardTitle className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-br from-white to-slate-400">
-                          {selectedToken.token}
-                        </CardTitle>
-                      </div>
-                      <div className="flex flex-col items-end">
-                        <div className="text-xs text-purple-400 font-bold uppercase tracking-wider mb-1">AI Confidence</div>
-                        <div className="text-3xl font-bold text-white shadow-purple-500/50 drop-shadow-lg">
-                          {selectedToken.prediction?.confidence}%
-                        </div>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-5 pt-4 relative z-10">
-
-                    {/* Action Button Only (No Selector) */}
-                    <div className="flex items-center gap-2">
-                      <Button
-                        onClick={runDeepAnalysis}
-                        disabled={analysisLoading}
-                        className={`w-full h-12 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 border border-purple-500/30 font-bold tracking-wider text-md shadow-[0_0_20px_rgba(168,85,247,0.4)] ${analysisLoading ? 'opacity-80' : ''}`}
-                      >
-                        {analysisLoading ? (
-                          <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> RUNNING SUPER-ENSEMBLE AI...</>
-                        ) : (
-                          <><Zap className="mr-2 h-5 w-5 fill-yellow-400 text-yellow-100" /> SCAN FOR GEMS (AI AUTO)</>
-                        )}
-                      </Button>
-                    </div>
-
-                    {/* AI Prediction Block */}
-                    <div className="bg-gradient-to-r from-slate-900 to-black rounded-xl p-1 border border-white/10 shadow-inner">
-                      <div className="bg-white/5 rounded-lg p-5 grid grid-cols-2 gap-4">
-                        <div className="text-center border-r border-white/10">
-                          <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Pump Probability</p>
-                          <div className={`text-2xl font-bold ${selectedToken.prediction?.confidence > 70 ? 'text-emerald-400' : 'text-yellow-400'}`}>
-                            {selectedToken.prediction?.confidence > 70 ? 'VERY HIGH' : 'MODERATE'}
-                          </div>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Est. Timeframe</p>
-                          <div className="text-2xl font-bold text-cyan-300">
-                            &lt; {selectedToken.prediction?.pump_in_hours} Hours
-                          </div>
-                        </div>
-                      </div>
-                      <div className="px-4 py-2 bg-black/40 text-[10px] text-center text-slate-500 font-mono border-t border-white/5">
-                        Source: {selectedToken.prediction?.source === 'sna_fast' ? 'Rapid Scan (SNA)' : `Deep Learning (${(selectedToken.prediction?.source || 'AUTO').toUpperCase()})`}
-                      </div>
-                    </div>
-
-                    {/* Stats Grid */}
-                    <div className="grid grid-cols-2 gap-3 text-sm">
-                      <div className="p-3 rounded-lg bg-white/5 border border-white/5 flex flex-col">
-                        <span className="text-slate-400 text-xs text-center mb-1">SNA Score</span>
-                        <span className="font-mono text-yellow-400 font-bold text-center text-lg">{(selectedToken.sna_score || 0).toFixed(0)}</span>
-                      </div>
-                      <div className="p-3 rounded-lg bg-white/5 border border-white/5 flex flex-col">
-                        <span className="text-slate-400 text-xs text-center mb-1">Liquidity</span>
-                        <span className="font-mono text-emerald-400 font-bold text-center text-lg">${((selectedToken.liquidity_usd || 0) / 1000).toFixed(1)}K</span>
-                      </div>
-                      <div className="p-3 rounded-lg bg-white/5 border border-white/5 flex flex-col">
-                        <span className="text-slate-400 text-xs text-center mb-1">Vol (1H)</span>
-                        <span className="font-mono text-white font-bold text-center text-lg">${((selectedToken.volume_1h || 0) / 1000).toFixed(1)}K</span>
-                      </div>
-                      <div className="p-3 rounded-lg bg-white/5 border border-white/5 flex flex-col">
-                        <span className="text-slate-400 text-xs text-center mb-1">Market Cap</span>
-                        <span className="font-mono text-blue-300 font-bold text-center text-lg">${((selectedToken.market_cap || 0) / 1000).toFixed(1)}K</span>
-                      </div>
-                    </div>
-
-                    <Button
-                      className="w-full h-12 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold tracking-wider rounded-xl shadow-lg shadow-cyan-900/40 border border-white/10 transition-all hover:scale-[1.02]"
-                      onClick={() => window.open(`https://dexscreener.com/${selectedToken.chain.toLowerCase()}/${selectedToken.token_address}`, '_blank')}
-                    >
-                      <Crosshair className="mr-2 h-5 w-5" />
-                      ANALYZE ON DEXSCREENER
-                    </Button>
-                  </CardContent>
-                </>
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center p-8 text-center text-slate-500 space-y-6 min-h-[400px]">
-                  <div className="relative">
-                    <div className="absolute inset-0 bg-cyan-500/20 blur-xl rounded-full"></div>
-                    <Crosshair className="h-20 w-20 text-slate-600 relative z-10" />
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-300">Awaiting Target Selection</h3>
-                    <p className="text-sm mt-2 text-slate-400 max-w-[250px] mx-auto leading-relaxed">
-                      Select any token from the Live Scanner to initiate Deep AI Analysis and Probability Scoring.
-                    </p>
-                  </div>
-                </div>
-              )}
-            </Card>
+        {/* Search & Filters Bar */}
+        <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+          <SearchBar value={searchQuery} onChange={setSearchQuery} />
+          
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-slate-500">Sort by:</span>
+            <select 
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="bg-slate-800/50 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-300 focus:border-cyan-500 focus:outline-none"
+            >
+              <option value="volume_1h">Volume (1H)</option>
+              <option value="price_change_5m">Change (5M)</option>
+              <option value="price_change_1h">Change (1H)</option>
+              <option value="sna_score">AI Score</option>
+              <option value="liquidity_usd">Liquidity</option>
+              <option value="market_cap">Market Cap</option>
+            </select>
           </div>
         </div>
+
+        {/* Tab Content */}
+        {activeTab === "scanner" && (
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            {/* Main Table */}
+            <div className="xl:col-span-2 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold flex items-center gap-3 text-white">
+                  <span className="relative flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-500 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+                  </span>
+                  Live Market Scanner
+                </h2>
+                <Badge variant="secondary" className="bg-slate-900 border border-slate-800 text-slate-400 font-mono">
+                  {lastUpdate ? lastUpdate.toLocaleTimeString() : '--:--:--'}
+                </Badge>
+              </div>
+              
+              <TokenTable 
+                tokens={filteredTokens} 
+                onSelectToken={setSelectedToken}
+                onAddToWatchlist={handleAddToWatchlist}
+                watchlist={watchlist}
+              />
+              
+              <p className="text-center text-xs text-slate-500">
+                Auto-refreshing every 10s • Powered by DexScreener API
+              </p>
+            </div>
+
+            {/* AI Analysis Panel */}
+            <div className="space-y-4">
+              <AIAnalysisPanel 
+                selectedToken={selectedToken}
+                apiBase={API_BASE}
+              />
+            </div>
+          </div>
+        )}
+
+        {activeTab === "trending" && (
+          <TrendingPanel trending={trending} onSelectToken={setSelectedToken} />
+        )}
+
+        {activeTab === "watchlist" && (
+          <WatchlistPanel 
+            watchlist={watchlist}
+            onRemove={handleRemoveFromWatchlist}
+            onSelectToken={setSelectedToken}
+          />
+        )}
+
+        {/* Footer */}
+        <footer className="text-center py-8 border-t border-white/5 mt-12">
+          <div className="flex items-center justify-center gap-6 text-slate-500 text-sm">
+            <div className="flex items-center gap-2">
+              <Shield className="h-4 w-4" />
+              <span>Secure API</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Cpu className="h-4 w-4" />
+              <span>AI Powered</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <BarChart3 className="h-4 w-4" />
+              <span>Real-time Data</span>
+            </div>
+          </div>
+          <p className="text-slate-600 text-xs mt-4">
+            CryptoHunter AI © 2026 • Not Financial Advice • DYOR
+          </p>
+        </footer>
       </div>
     </main>
   );

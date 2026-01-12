@@ -1,18 +1,22 @@
 """
-CryptoHunter API Server
-=======================
+CryptoHunter API Server V3
+==========================
 Backend untuk CryptoHunter Web Interface.
 Menyediakan data DexScreener + Analisis AI via HTTP JSON API.
+Features: Real-time Scanning, Watchlist, Portfolio, Alert System
 """
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import pandas as pd
 import threading
 import time
-from datetime import datetime
+import json
+import asyncio
+from datetime import datetime, timedelta
+from collections import defaultdict
 
 # Import existing modules
 from modules.dex_api import DexScreenerAPI, get_historical_data
@@ -22,8 +26,10 @@ from modules.db import db
 
 app = FastAPI(
     title="CryptoHunter API",
-    description="Backend API untuk CryptoHunter AI Dashboard",
-    version="2.1.0"
+    description="🚀 Advanced AI-Powered Crypto Scanner & Prediction Engine",
+    version="3.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
 # Initialize DB
@@ -55,8 +61,17 @@ class DataCache:
         self.is_updating = False
         self.scan_progress = 100
         self.scan_status = "Idle"
+        self.price_history = defaultdict(list)  # For sparkline charts
+        self.alerts = []  # Price alerts
 
 data_cache = DataCache()
+
+# Watchlist storage (in production, use DB)
+watchlist_storage = {}  # {user_id: [token_addresses]}
+portfolio_storage = {}  # {user_id: {token_address: {amount, buy_price}}}
+
+# WebSocket connections for real-time updates
+active_connections: List[WebSocket] = []
 
 # --- Models ---
 
@@ -78,6 +93,8 @@ class TokenData(BaseModel):
     sna_score: float
     prediction: Optional[TokenPrediction] = None
     status: str  # PUMP, DUMP, NEUTRAL
+    sparkline: Optional[List[float]] = None  # Mini chart data
+    is_watchlisted: bool = False
 
 class MarketSummary(BaseModel):
     total_volume: float
@@ -87,6 +104,26 @@ class MarketSummary(BaseModel):
     active_tokens: int
     scan_progress: int = 100
     scan_status: str = "Idle"
+    top_gainer: Optional[Dict] = None
+    top_loser: Optional[Dict] = None
+    market_sentiment: str = "neutral"
+
+class WatchlistItem(BaseModel):
+    token_address: str
+    chain: str
+    added_at: Optional[str] = None
+
+class PortfolioItem(BaseModel):
+    token_address: str
+    chain: str
+    amount: float
+    buy_price: float
+    
+class AlertCreate(BaseModel):
+    token_address: str
+    chain: str
+    target_price: float
+    alert_type: str  # "above" or "below"
 
 # --- Background Tasks ---
 
@@ -236,42 +273,216 @@ def update_market_cache():
 
 @app.get("/")
 def read_root():
-    return {"status": "online", "message": "CryptoHunter API V2 Running"}
+    return {
+        "status": "online", 
+        "message": "🚀 CryptoHunter API V3 Running",
+        "version": "3.0.0",
+        "endpoints": {
+            "docs": "/docs",
+            "tokens": "/api/tokens",
+            "summary": "/api/market/summary",
+            "watchlist": "/api/watchlist",
+            "trending": "/api/trending",
+            "predict": "/api/tokens/{address}/predict"
+        }
+    }
 
-@app.get("/api/market/summary", response_model=MarketSummary)
+@app.get("/api/market/summary")
 def get_market_summary():
     """Get overall market statistics from cached data"""
     if not data_cache.market_data:
         # Trigger update if empty
         threading.Thread(target=update_market_cache).start()
-        return MarketSummary(
-            total_volume=0, avg_change=0, gainers=0, losers=0, active_tokens=0,
-            scan_progress=data_cache.scan_progress, scan_status=data_cache.scan_status
-        )
+        return {
+            "total_volume": 0, "avg_change": 0, "gainers": 0, "losers": 0, 
+            "active_tokens": 0, "scan_progress": data_cache.scan_progress, 
+            "scan_status": data_cache.scan_status, "top_gainer": None,
+            "top_loser": None, "market_sentiment": "neutral"
+        }
     
     df = pd.DataFrame(data_cache.market_data)
     
-    return MarketSummary(
-        total_volume=df['volume_1h'].sum(),
-        avg_change=df['price_change_1h'].mean(),
-        gainers=len(df[df['price_change_1h'] > 0]),
-        losers=len(df[df['price_change_1h'] < 0]),
-        active_tokens=len(df),
-        scan_progress=data_cache.scan_progress,
-        scan_status=data_cache.scan_status
-    )
+    # Calculate top gainer and loser
+    top_gainer = None
+    top_loser = None
+    if not df.empty:
+        gainer_idx = df['price_change_1h'].idxmax()
+        loser_idx = df['price_change_1h'].idxmin()
+        top_gainer = {"token": df.loc[gainer_idx, 'token'], "change": df.loc[gainer_idx, 'price_change_1h']}
+        top_loser = {"token": df.loc[loser_idx, 'token'], "change": df.loc[loser_idx, 'price_change_1h']}
+    
+    # Calculate market sentiment
+    avg_change = df['price_change_1h'].mean()
+    sentiment = "bullish" if avg_change > 2 else "bearish" if avg_change < -2 else "neutral"
+    
+    return {
+        "total_volume": float(df['volume_1h'].sum()),
+        "avg_change": float(df['price_change_1h'].mean()),
+        "gainers": int(len(df[df['price_change_1h'] > 0])),
+        "losers": int(len(df[df['price_change_1h'] < 0])),
+        "active_tokens": len(df),
+        "scan_progress": data_cache.scan_progress,
+        "scan_status": data_cache.scan_status,
+        "top_gainer": top_gainer,
+        "top_loser": top_loser,
+        "market_sentiment": sentiment
+    }
 
-@app.get("/api/tokens", response_model=List[TokenData])
-async def get_tokens(refresh: bool = False):
-    """Get list of hot tokens"""
+@app.get("/api/tokens")
+async def get_tokens(refresh: bool = False, sort_by: str = "volume_1h", limit: int = 50):
+    """Get list of hot tokens with sorting options"""
     # Auto refresh if stale (> 30s)
     if refresh or (time.time() - data_cache.last_update > 30):
-        # ALWAYS Run in background to prevent blocking
-        # Frontend handles empty/stale state
         threading.Thread(target=update_market_cache).start()
     
     with cache_lock:
-        return data_cache.market_data
+        tokens = data_cache.market_data.copy()
+    
+    # Add sparkline data to each token
+    for token in tokens:
+        addr = token.get('token_address', '')
+        if addr in data_cache.price_history:
+            token['sparkline'] = data_cache.price_history[addr][-20:]  # Last 20 prices
+        else:
+            token['sparkline'] = []
+    
+    # Sort tokens
+    if tokens and sort_by in ['volume_1h', 'price_change_5m', 'price_change_1h', 'sna_score', 'liquidity_usd', 'market_cap']:
+        tokens = sorted(tokens, key=lambda x: x.get(sort_by, 0), reverse=True)
+    
+    return tokens[:limit]
+
+@app.get("/api/trending")
+async def get_trending():
+    """Get trending tokens based on various metrics"""
+    with cache_lock:
+        tokens = data_cache.market_data.copy()
+    
+    if not tokens:
+        return {"hot": [], "gainers": [], "new": [], "ai_picks": []}
+    
+    df = pd.DataFrame(tokens)
+    
+    return {
+        "hot": df.nlargest(5, 'volume_1h')[['token', 'chain', 'token_address', 'price_change_1h', 'volume_1h']].to_dict('records'),
+        "gainers": df.nlargest(5, 'price_change_1h')[['token', 'chain', 'token_address', 'price_change_1h']].to_dict('records'),
+        "ai_picks": df.nlargest(5, 'sna_score')[['token', 'chain', 'token_address', 'sna_score', 'prediction']].to_dict('records'),
+        "losers": df.nsmallest(5, 'price_change_1h')[['token', 'chain', 'token_address', 'price_change_1h']].to_dict('records')
+    }
+
+# === WATCHLIST ENDPOINTS ===
+
+@app.get("/api/watchlist")
+async def get_watchlist(user_id: str = "default"):
+    """Get user's watchlist"""
+    watchlist = watchlist_storage.get(user_id, [])
+    
+    # Enrich with current token data
+    enriched = []
+    with cache_lock:
+        for item in watchlist:
+            for token in data_cache.market_data:
+                if token['token_address'] == item['token_address']:
+                    enriched.append({**token, **item, "is_watchlisted": True})
+                    break
+    
+    return enriched
+
+@app.post("/api/watchlist")
+async def add_to_watchlist(item: WatchlistItem, user_id: str = "default"):
+    """Add token to watchlist"""
+    if user_id not in watchlist_storage:
+        watchlist_storage[user_id] = []
+    
+    # Check if already exists
+    for existing in watchlist_storage[user_id]:
+        if existing['token_address'] == item.token_address:
+            return {"status": "already_exists"}
+    
+    watchlist_storage[user_id].append({
+        "token_address": item.token_address,
+        "chain": item.chain,
+        "added_at": datetime.now().isoformat()
+    })
+    
+    return {"status": "added", "watchlist_count": len(watchlist_storage[user_id])}
+
+@app.delete("/api/watchlist/{address}")
+async def remove_from_watchlist(address: str, user_id: str = "default"):
+    """Remove token from watchlist"""
+    if user_id in watchlist_storage:
+        watchlist_storage[user_id] = [
+            w for w in watchlist_storage[user_id] if w['token_address'] != address
+        ]
+    return {"status": "removed"}
+
+# === ALERTS ENDPOINTS ===
+
+@app.get("/api/alerts")
+async def get_alerts(user_id: str = "default"):
+    """Get user's price alerts"""
+    return [a for a in data_cache.alerts if a.get('user_id') == user_id]
+
+@app.post("/api/alerts")
+async def create_alert(alert: AlertCreate, user_id: str = "default"):
+    """Create price alert"""
+    alert_data = {
+        "id": len(data_cache.alerts) + 1,
+        "user_id": user_id,
+        "token_address": alert.token_address,
+        "chain": alert.chain,
+        "target_price": alert.target_price,
+        "alert_type": alert.alert_type,
+        "created_at": datetime.now().isoformat(),
+        "triggered": False
+    }
+    data_cache.alerts.append(alert_data)
+    return alert_data
+
+@app.delete("/api/alerts/{alert_id}")
+async def delete_alert(alert_id: int):
+    """Delete an alert"""
+    data_cache.alerts = [a for a in data_cache.alerts if a.get('id') != alert_id]
+    return {"status": "deleted"}
+
+# === HISTORICAL DATA ENDPOINT ===
+
+@app.get("/api/tokens/{address}/history")
+async def get_token_history(address: str, chain: str = "solana", interval: str = "1h"):
+    """Get historical price data for charts"""
+    try:
+        hist_data = get_historical_data(address, chain_id=chain)
+        
+        if hist_data.empty:
+            # Generate mock data for new tokens
+            return {
+                "address": address,
+                "chain": chain,
+                "data": [],
+                "message": "No historical data available for new token"
+            }
+        
+        # Format for frontend charts
+        chart_data = []
+        for _, row in hist_data.iterrows():
+            chart_data.append({
+                "timestamp": row.get('timestamp', datetime.now().isoformat()),
+                "open": float(row.get('open', 0)),
+                "high": float(row.get('high', 0)),
+                "low": float(row.get('low', 0)),
+                "close": float(row.get('close', 0)),
+                "volume": float(row.get('volume', 0))
+            })
+        
+        return {
+            "address": address,
+            "chain": chain,
+            "interval": interval,
+            "data": chart_data
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/tokens/{address}/predict")
 async def predict_token(address: str, chain: str = "solana"):
@@ -290,13 +501,11 @@ async def predict_token(address: str, chain: str = "solana"):
              raise HTTPException(status_code=404, detail="Token info not found")
         
         # 3. Calculate Real SNA Score (Simplified for speed)
-        # In prod, you'd want to call the SNA module properly
         sna_score = 50 
         
         token_symbol = token_info.get('baseToken', {}).get('symbol', 'UNKNOWN')
         
         # 4. Run Comprehensive Analysis
-        # Note: We replaced 'train_model' and 'predict_pump_time' with this unified call
         from modules.price_predictor import analyze_token_comprehensive
         
         prediction = analyze_token_comprehensive(hist_data, token_info, sna_score)
@@ -305,7 +514,7 @@ async def predict_token(address: str, chain: str = "solana"):
             "token": token_symbol,
             "address": address,
             "prediction": {
-                "ensemble": prediction # Match existing frontend format
+                "ensemble": prediction
             },
             "last_price": hist_data['close'].iloc[-1] if not hist_data.empty else 0,
             "analysis_timestamp": datetime.now().isoformat()
@@ -317,8 +526,59 @@ async def predict_token(address: str, chain: str = "solana"):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+# === WEBSOCKET FOR REAL-TIME UPDATES ===
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket for real-time price updates"""
+    await websocket.accept()
+    active_connections.append(websocket)
+    try:
+        while True:
+            # Send market data every 5 seconds
+            with cache_lock:
+                data = {
+                    "type": "market_update",
+                    "data": data_cache.market_data[:10],  # Top 10
+                    "timestamp": datetime.now().isoformat()
+                }
+            await websocket.send_json(data)
+            await asyncio.sleep(5)
+    except WebSocketDisconnect:
+        active_connections.remove(websocket)
+
+# === SEARCH ENDPOINT ===
+
+@app.get("/api/search")
+async def search_tokens(q: str):
+    """Search tokens by name or address"""
+    with cache_lock:
+        tokens = data_cache.market_data.copy()
+    
+    q_lower = q.lower()
+    results = [
+        t for t in tokens 
+        if q_lower in t.get('token', '').lower() or 
+           q_lower in t.get('token_address', '').lower()
+    ]
+    
+    return results[:20]
+
+# === HEALTH CHECK ===
+
+@app.get("/api/health")
+async def health_check():
+    """API Health check endpoint"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "cache_age_seconds": int(time.time() - data_cache.last_update),
+        "tokens_cached": len(data_cache.market_data),
+        "is_scanning": data_cache.is_updating
+    }
+
 if __name__ == "__main__":
     import uvicorn
-    # Start loop in thread
+    # Start cache update in thread
     update_market_cache()
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
