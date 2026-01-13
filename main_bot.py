@@ -24,23 +24,20 @@ init(autoreset=True)
 # Import modules
 from modules.dex_api import DexScreenerAPI, search_new_pairs, get_historical_data
 from modules.sna_analyzer import SNAAnalyzer, SNAResult, HypeLevel
-from modules.price_predictor import (
-    EnsemblePredictor, train_model, 
-    predict_pump_time, format_prediction
-)
+from modules.enhanced_predictor import EnhancedPredictor
 
 
 class CryptoHunterBot:
-    """Main bot orchestrator V2 - Enhanced AI Engine"""
+    """Main bot orchestrator V2.1 - Enhanced AI Engine"""
     
-    VERSION = "2.0.0"
+    VERSION = "2.1.0"
     
     def __init__(self, min_liquidity: float = 5000, min_sna_score: float = 40):
         self.min_liquidity = min_liquidity
         self.min_sna_score = min_sna_score
         self.dex_api = DexScreenerAPI()
         self.sna_analyzer = SNAAnalyzer()
-        self.lstm_models = {}  # Cache trained models
+        self.enhanced_predictor = EnhancedPredictor()  # New Enhanced Predictor
         self.results = []
     
     def print_banner(self):
@@ -51,7 +48,7 @@ class CryptoHunterBot:
 ║   {Fore.YELLOW}🔍 CRYPTOHUNTER BOT v{self.VERSION}{Fore.CYAN}                                      ║
 ║   {Fore.WHITE}Micin Hunter & Pump Predictor{Fore.CYAN}                                  ║
 ║                                                                  ║
-║   {Fore.GREEN}▸ DexScreener API{Fore.CYAN}  {Fore.GREEN}▸ SNA Analysis{Fore.CYAN}  {Fore.GREEN}▸ LSTM + Time-GPT{Fore.CYAN}       ║
+║   {Fore.GREEN}▸ DexScreener API{Fore.CYAN}  {Fore.GREEN}▸ SNA Analysis{Fore.CYAN}  {Fore.GREEN}▸ Sentiment Aware{Fore.CYAN}       ║
 ║                                                                  ║
 ╚══════════════════════════════════════════════════════════════════╝{Style.RESET_ALL}
 """
@@ -87,34 +84,32 @@ class CryptoHunterBot:
             print(f"{Fore.YELLOW}[INFO] Tidak ada token yang lolos filter SNA{Style.RESET_ALL}")
             filtered = sna_results[:5]  # Take top 5 anyway
         
-        # Step 3: AI Prediction V2
+        # Step 3: Enhanced AI Prediction
         print(f"\n{Fore.YELLOW}{'─'*60}")
-        print(f"  STEP 3: AI Prediction V2 (Attention LSTM + Ensemble)")
+        print(f"  STEP 3: Enhanced Prediction (AI + Sentiment + Global Data)")
         print(f"{'─'*60}{Style.RESET_ALL}\n")
         
         final_results = []
         
         for sna_result in filtered[:top_n]:
             try:
-                # Get historical data
-                hist_data = get_historical_data(
-                    pair_address=pairs_df[pairs_df['base_token'] == sna_result.token_symbol].iloc[0]['pair_address'],
-                    chain_id=sna_result.chain_id
-                )
+                # Prediction is now handled by EnhancedPredictor which fetches its own data/history when needed
+                # However, our EnhancedPredictor expects a symbol.
+                # SNA result gives us token symbol.
                 
-                if hist_data.empty:
-                    continue
+                print(f"Analyzing {sna_result.token_symbol}...")
                 
-                # Train LSTM (or use cached)
-                model_key = sna_result.token_symbol
-                if model_key not in self.lstm_models:
-                    model, train_result = train_model(hist_data, epochs=150)  # V2: More epochs
-                    self.lstm_models[model_key] = model
-                else:
-                    model = self.lstm_models[model_key]
+                # We reuse the symbol from SNA result. Note: EnhancedPredictor handles data fetching internally.
+                # But to preserve the specific pair found by DexScreener, maybe we should pass context?
+                # For now EnhancedPredictor uses aggregated data for major coins or fetches anew.
+                # Since this is a "Micin Hunter", these tokens might NOT be on Binance.
+                # EnhancedPredictor gracefully handles missing Binance data.
                 
-                # Predict
-                prediction = predict_pump_time(model, hist_data, sna_result.sna_score)
+                prediction = self.enhanced_predictor.predict(sna_result.token_symbol, use_binance=True)
+                
+                if not prediction:
+                     print(f"{Fore.RED}   [SKIP] Prediction failed for {sna_result.token_symbol}{Style.RESET_ALL}")
+                     continue
                 
                 # Get price and token address from pairs_df
                 pair_row = pairs_df[pairs_df['base_token'] == sna_result.token_symbol].iloc[0]
@@ -132,7 +127,7 @@ class CryptoHunterBot:
                     "volume_spike": sna_result.volume_spike_1h,
                     "buy_sell_ratio": sna_result.buy_sell_ratio,
                     "is_potential_pump": sna_result.is_potential_pump,
-                    "prediction": prediction
+                    "prediction": prediction # This is now an EnhancedPrediction object
                 })
                 
                 time.sleep(0.3)  # Rate limiting
@@ -157,12 +152,11 @@ class CryptoHunterBot:
             return
         
         # Sort by prediction confidence
-        results.sort(key=lambda x: x['prediction'].get('ensemble', {}).get('confidence', 0), reverse=True)
+        results.sort(key=lambda x: x['prediction'].confidence, reverse=True)
         
         for i, r in enumerate(results, 1):
-            ens = r['prediction'].get('ensemble', {})
-            pump_hours = ens.get('pump_in_hours', 'N/A')
-            confidence = ens.get('confidence', 0)
+            pred = r['prediction'] # EnhancedPrediction object
+            confidence = pred.confidence
             
             # Determine color based on confidence
             if confidence > 75:
@@ -204,10 +198,10 @@ class CryptoHunterBot:
             print(f"   ├─ 📊 MarketCap  : {mcap_str}")
             print(f"   ├─ SNA Score    : {r['sna_score']:.1f}/100")
             print(f"   ├─ Hype Level   : {r['hype_level']}")
-            print(f"   ├─ Volume Spike : {r['volume_spike']:.0f}%")
-            print(f"   ├─ Buy/Sell     : {r['buy_sell_ratio']:.2f}")
-            print(f"   ├─ AI Accuracy  : {confidence:.0f}%")
-            print(f"   └─ ⏱️  Time to Pump: {pump_hours} hours{Style.RESET_ALL}")
+            print(f"   ├─ AI Signal    : {pred.signal} ({confidence:.1f}%)")
+            print(f"   ├─ Sentiment    : {pred.fear_greed_classification} ({pred.fear_greed_value})")
+            print(f"   ├─ Binance Vol  : {pred.binance_volume_24h:,.2f}")
+            print(f"   └─ Data Sources : {', '.join(pred.data_sources)}{Style.RESET_ALL}")
         
         print(f"\n{Fore.CYAN}{'═'*70}")
         print(f"  📊 SUMMARY")

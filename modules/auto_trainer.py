@@ -29,12 +29,23 @@ training_status = {
     "errors": []
 }
 
-# Priority coins to train (high volume/popular)
-PRIORITY_COINS = [
+# Training mode: "smart" (dynamic) or "fixed" (static list)
+TRAINING_MODE = os.getenv('TRAINING_MODE', 'smart')  # Default to smart mode
+
+# Coins that are ALWAYS trained regardless of mode
+ALWAYS_TRAIN = ["btc", "eth", "sol", "xrp", "doge"]
+
+# Old static list (used when TRAINING_MODE = "fixed")
+FIXED_PRIORITY_COINS = [
     "btc", "eth", "sol", "xrp", "doge", "ada", "avax", "dot", 
     "link", "matic", "shib", "pepe", "uni", "atom", "near",
     "arb", "op", "apt", "sui", "inj", "sei", "tia", "jup"
 ]
+
+# Smart mode configuration
+MAX_TRAINING_COINS = 25
+MIN_VOLUME_24H = 10_000_000   # 10M IDR minimum (lowered for more coins)
+MIN_MARKET_CAP = 5_000_000    # 5M IDR minimum (lowered for more coins)
 
 # Training interval in minutes
 TRAINING_INTERVAL = 30  # Retrain setiap 30 menit
@@ -102,6 +113,93 @@ class AutoTrainer:
                 self.forecaster = IndodaxAIForecaster()
         return self.forecaster
     
+    def calculate_training_priority(self, coin_data: dict) -> float:
+        """
+        Calculate priority score for training a coin
+        Higher score = higher priority
+        """
+        try:
+            volume_24h = float(coin_data.get('volume_24h_idr', 0))
+            market_cap = float(coin_data.get('market_cap', 0))
+            change_24h = float(coin_data.get('change_24h', 0))
+            volatility = abs(change_24h)
+            
+            # Weighted scoring
+            # Volume: 40%, Market Cap: 30%, Volatility: 20%, Base: 10%
+            score = (
+                (volume_24h / 1e12) * 40 +      # Normalize to trillions
+                (market_cap / 1e12) * 30 +
+                min(volatility, 20) * 20 +       # Cap volatility at 20%
+                10                                # Base score
+            )
+            
+            return score
+        except:
+            return 0.0
+    
+    def get_smart_selection(self) -> List[str]:
+        """
+        Smart dynamic coin selection based on Indodax market data
+        Returns top coins by volume, market cap, and activity
+        """
+        try:
+            # Get Indodax market data
+            from modules.indodax_api import get_indodax_market
+            market_data = get_indodax_market()
+            
+            if not market_data:
+                print("[AUTO-TRAINER] No market data, using always-train list")
+                return ALWAYS_TRAIN[:]
+            
+            # Score and filter coins
+            scored_coins = []
+            for coin in market_data:
+                symbol = coin.get('symbol', '').replace('_IDR', '').lower()
+                
+                # Get volume (use 24h volume in IDR)
+                volume = float(coin.get('volume_24h_idr', 0))
+                if volume == 0:
+                    # Try alternative volume field
+                    volume = float(coin.get('volume', 0))
+                
+                # Skip very low volume coins
+                if volume < MIN_VOLUME_24H:
+                    continue
+                
+                # Calculate simplified score (volume-based since market_cap often missing)
+                try:
+                    score = self.calculate_training_priority(coin)
+                except:
+                    # Fallback to volume-only scoring
+                    score = (volume / 1e12) * 100
+                
+                scored_coins.append((symbol, score, volume))
+            
+            # Sort by score descending
+            scored_coins.sort(key=lambda x: x[1], reverse=True)
+            
+            # Get top N coins
+            selected = [c[0] for c in scored_coins[:MAX_TRAINING_COINS]]
+            
+            # Ensure ALWAYS_TRAIN coins are included
+            for coin in ALWAYS_TRAIN:
+                if coin not in selected:
+                    selected.insert(0, coin)
+            
+            # Trim to max
+            selected = selected[:MAX_TRAINING_COINS]
+            
+            print(f"[AUTO-TRAINER] Smart selection: {len(selected)} coins from {len(scored_coins)} qualified")
+            if scored_coins:
+                print(f"[AUTO-TRAINER] Top 5 by score: {[c[0] for c in scored_coins[:5]]}")
+            return selected
+            
+        except Exception as e:
+            print(f"[AUTO-TRAINER] Smart selection error: {e}, using always-train list")
+            import traceback
+            traceback.print_exc()
+            return ALWAYS_TRAIN[:]
+    
     def needs_training(self, coin: str) -> bool:
         """Check if coin needs retraining"""
         if coin not in self.last_trained:
@@ -110,12 +208,21 @@ class AutoTrainer:
         age = datetime.now() - self.last_trained[coin]
         return age.total_seconds() > (MAX_TRAINING_AGE * 60)
     
+    
     def get_training_queue(self) -> List[str]:
         """Get list of coins that need training, prioritized"""
         queue = []
         
+        # Select coins based on training mode
+        if TRAINING_MODE == 'smart':
+            print("[AUTO-TRAINER] Using SMART mode (dynamic selection)")
+            priority_coins = self.get_smart_selection()
+        else:
+            print("[AUTO-TRAINER] Using FIXED mode (static list)")
+            priority_coins = FIXED_PRIORITY_COINS
+        
         # Add priority coins that need training
-        for coin in PRIORITY_COINS:
+        for coin in priority_coins:
             if self.needs_training(coin):
                 queue.append(coin)
         
@@ -149,7 +256,7 @@ class AutoTrainer:
                     training_status["total_trained_today"] += 1
                     self._save_status()
                     
-                    print(f"[AUTO-TRAINER] ✅ {coin.upper()} trained successfully! Accuracy: {result.get('avg_accuracy', 0):.2f}%")
+                    print(f"[AUTO-TRAINER] [OK] {coin.upper()} trained successfully! Accuracy: {result.get('avg_accuracy', 0):.2f}%")
                     return {"success": True, "accuracy": result.get('avg_accuracy', 0)}
                 else:
                     error_msg = result.get('message', 'Unknown error')
@@ -158,7 +265,7 @@ class AutoTrainer:
                         'error': error_msg,
                         'time': datetime.now().isoformat()
                     })
-                    print(f"[AUTO-TRAINER] ❌ {coin.upper()} training failed: {error_msg}")
+                    print(f"[AUTO-TRAINER] [ERROR] {coin.upper()} training failed: {error_msg}")
                     return {"success": False, "error": error_msg}
                     
             except Exception as e:
@@ -168,7 +275,7 @@ class AutoTrainer:
                     'error': error_msg,
                     'time': datetime.now().isoformat()
                 })
-                print(f"[AUTO-TRAINER] ❌ {coin.upper()} error: {e}")
+                print(f"[AUTO-TRAINER] [ERROR] {coin.upper()} error: {e}")
                 return {"success": False, "error": error_msg}
             finally:
                 training_status["is_running"] = False
@@ -200,7 +307,7 @@ class AutoTrainer:
     
     def _scheduler_loop(self):
         """Background scheduler loop"""
-        print("[AUTO-TRAINER] 🚀 Scheduler started!")
+        print("[AUTO-TRAINER] [START] Scheduler started!")
         
         # Run initial training cycle
         self.run_training_cycle()
@@ -224,7 +331,7 @@ class AutoTrainer:
         self.scheduler_thread = threading.Thread(target=self._scheduler_loop, daemon=True)
         self.scheduler_thread.start()
         
-        print(f"[AUTO-TRAINER] ✅ Started! Training every {TRAINING_INTERVAL} minutes")
+        print(f"[AUTO-TRAINER] [OK] Started! Training every {TRAINING_INTERVAL} minutes")
         return True
     
     def stop(self):

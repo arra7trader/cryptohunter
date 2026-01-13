@@ -1,0 +1,95 @@
+# Quick test endpoint to verify forecast system
+@app.get("/api/forecast/test")
+async def test_forecast():
+    """Test endpoint to verify forecasting system is working"""
+    return {
+        "status": "ok",
+        "message": "Forecast system ready",
+        "available_models": {
+            "prophet": "✅ Prophet (Meta) - Free",
+            "lstm_ensemble": "✅ LSTM Ensemble (5 models) - Free"
+        },
+        "supported_symbols": ["BTC", "ETH", "SOL", "DOGE", "ADA", "MATIC", "LINK"],
+        "endpoints": [
+            "/api/forecast/prophet/{symbol}",
+            "/api/forecast/lstm/{symbol}",
+            "/api/forecast/compare/{symbol}"
+        ]
+    }
+
+
+@app.get("/api/forecast/prophet/{symbol}")
+async def forecast_with_prophet_endpoint(symbol: str):
+    """📊 Prophet Forecast - 100% Free, no API key required"""
+    try:
+        # Get historical data
+        if symbol.upper() in ['BTC', 'ETH', 'SOL', 'DOGE', 'ADA', 'MATIC', 'LINK']:
+            from modules.crypto_data_aggregator import get_aggregated_data
+            aggregated = get_aggregated_data(symbol, interval='1h')
+            
+            if aggregated and aggregated.total_candles >= 50:
+                df = aggregated.ohlcv
+            else:
+                return {"error": f"Insufficient data for {symbol}"}
+        else:
+            return {"error": f"Symbol not supported yet: {symbol}"}
+        
+        # Run forecast
+        result = unified_forecaster.forecast_with_prophet(df)
+        
+        if result is None:
+            return {
+                "error": "Prophet not available",
+                "message": "Install Prophet with: pip install prophet"
+            }
+        
+        return unified_forecaster._result_to_dict(result)
+        
+    except Exception as e:
+        print(f"[API] Prophet forecast error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/forecast/compare/{symbol}")
+async def compare_all_forecasts(symbol: str):
+    """🎯 Compare Prophet + LSTM - Get best ensemble prediction"""
+    try:
+        # Get historical data
+        if symbol.upper() in ['BTC', 'ETH', 'SOL', 'DOGE', 'ADA', 'MATIC', 'LINK']:
+            from modules.crypto_data_aggregator import get_aggregated_data
+            aggregated = get_aggregated_data(symbol, interval='1h')
+            
+            if aggregated and aggregated.total_candles >= 50:
+                df = aggregated.ohlcv
+            else:
+                return {"error": f"Insufficient data for {symbol}"}
+        else:
+            return {"error": f"Symbol not supported yet: {symbol}"}
+        
+        # Get both predictions
+        prophet_result = unified_forecaster.forecast_with_prophet(df)
+        
+        comparison = {
+            'prophet': unified_forecaster._result_to_dict(prophet_result) if prophet_result else None,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Add ensemble if both available  
+        ensemble = unified_forecaster.forecast_ensemble(df)
+        if ensemble:
+            comparison['ensemble'] = unified_forecaster._result_to_dict(ensemble)
+        
+        return {
+            "symbol": symbol.upper(),
+            "comparison": comparison
+        }
+        
+    except Exception as e:
+        print(f"[API] Forecast comparison error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+

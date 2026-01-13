@@ -275,147 +275,90 @@ class DexScreenerAPI:
     
     def get_historical_data(self, pair_address: str, chain_id: str = "solana") -> pd.DataFrame:
         """
-        Mengambil data historis untuk training
-        
-        Note: DexScreener tidak menyediakan endpoint candle gratis,
-        jadi kita menggunakan data transaksi dan volume sebagai proxy
+        Mengambil data historis REAL menggunakan GeckoTerminal API
         
         Args:
             pair_address: Alamat pair
-            chain_id: ID chain
+            chain_id: ID chain (dexscreener format, will be mapped to geckoterminal)
             
         Returns:
-            DataFrame dengan data historis (simulasi dari current data)
+            DataFrame dengan data historis OHLCV
         """
-        print(f"{Fore.CYAN}[INFO] Mengambil data historis untuk {pair_address[:10]}...{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}[INFO] Mengambil data historis REAL (GeckoTerminal) untuk {pair_address[:10]}...{Style.RESET_ALL}")
         
-        # Get current pair data
-        endpoint = f"/latest/dex/pairs/{chain_id}/{pair_address}"
-        data = self._make_request(endpoint)
+        # Mapping chain ID DexScreener -> GeckoTerminal
+        gecko_chain = self._map_chain_to_gecko(chain_id)
         
-        if not data or "pairs" not in data or len(data["pairs"]) == 0:
-            print(f"{Fore.YELLOW}[WARNING] Data pair tidak ditemukan{Style.RESET_ALL}")
+        # GeckoTerminal API Endpoint for OHLCV
+        # https://api.geckoterminal.com/api/v2/networks/{network}/pools/{pool_address}/ohlcv/{timeframe}
+        # Timeframe 'hour' gives us hourly candles
+        url = f"https://api.geckoterminal.com/api/v2/networks/{gecko_chain}/pools/{pair_address}/ohlcv/hour"
+        
+        params = {
+            "limit": 100  # Get last 100 hours
+        }
+        
+        try:
+            response = self.session.get(url, params=params, timeout=15)
+            
+            if response.status_code == 200:
+                data = response.json()
+                ohlcv_list = data.get("data", {}).get("attributes", {}).get("ohlcv_list", [])
+                
+                if not ohlcv_list:
+                    print(f"{Fore.YELLOW}[WARNING] Tidak ada data candle ditemukan di GeckoTerminal{Style.RESET_ALL}")
+                    return pd.DataFrame()
+                
+                # Parse OHLCV list [timestamp, open, high, low, close, volume]
+                # Timestamp is in seconds
+                
+                parsed_data = []
+                for candle in ohlcv_list:
+                    parsed_data.append({
+                        "timestamp": datetime.fromtimestamp(candle[0]),
+                        "open": float(candle[1]),
+                        "high": float(candle[2]),
+                        "low": float(candle[3]),
+                        "close": float(candle[4]),
+                        "volume": float(candle[5])
+                    })
+                
+                # Sort ascending (oldest first) for training
+                df = pd.DataFrame(parsed_data).sort_values("timestamp")
+                print(f"{Fore.GREEN}[SUCCESS] Berhasil mengambil {len(df)} candle asli dari GeckoTerminal{Style.RESET_ALL}")
+                return df
+                
+            elif response.status_code == 404:
+                print(f"{Fore.YELLOW}[WARNING] Pool tidak ditemukan di GeckoTerminal (Mungkin terlalu baru?){Style.RESET_ALL}")
+                return pd.DataFrame()
+            elif response.status_code == 429:
+                print(f"{Fore.YELLOW}[WARN] GeckoTerminal Rate Limit Hit{Style.RESET_ALL}")
+                return pd.DataFrame()
+            else:
+                print(f"{Fore.RED}[ERR] GeckoTerminal Error {response.status_code}{Style.RESET_ALL}")
+                return pd.DataFrame()
+                
+        except Exception as e:
+            print(f"{Fore.RED}[ERR] Gagal mengambil data GeckoTerminal: {e}{Style.RESET_ALL}")
             return pd.DataFrame()
-        
-        pair = data["pairs"][0]
-        
-        # Generate synthetic historical data berdasarkan current metrics
-        # Ini adalah simulasi karena DexScreener tidak menyediakan historical candles gratis
-        current_price = float(pair.get("priceUsd", 0) or 0)
-        volume_24h = float(pair.get("volume", {}).get("h24", 0) or 0)
-        price_change_24h = float(pair.get("priceChange", {}).get("h24", 0) or 0)
-        
-        historical_data = self._generate_synthetic_history(
-            current_price=current_price,
-            volume_24h=volume_24h,
-            price_change_24h=price_change_24h,
-            hours=48  # 48 jam data
-        )
-        
-        print(f"{Fore.GREEN}[SUCCESS] Generated {len(historical_data)} data points{Style.RESET_ALL}")
-        return historical_data
-    
-    def _generate_synthetic_history(self, current_price: float, volume_24h: float, 
-                                     price_change_24h: float, hours: int = 48) -> pd.DataFrame:
-        """
-        Generate synthetic historical data V2 - More realistic patterns
-        Includes: trend, cycles, volume correlation, and micro-patterns
-        """
-        import numpy as np
-        
-        if current_price == 0:
-            return pd.DataFrame()
-        
-        # Calculate starting price
-        start_price = current_price / (1 + price_change_24h / 100) if price_change_24h != -100 else current_price
-        
-        # Generate timestamps
-        now = datetime.now()
-        timestamps = [now - timedelta(hours=hours-i) for i in range(hours)]
-        
-        np.random.seed(int(now.timestamp()) % 10000)  # Dynamic seed
-        
-        # === V2: Multi-component price generation ===
-        
-        # 1. Base trend (linear interpolation with acceleration)
-        trend_power = 1.5 if price_change_24h > 0 else 0.8  # Accelerate if bullish
-        t = np.linspace(0, 1, hours)
-        base_trend = start_price + (current_price - start_price) * (t ** trend_power)
-        
-        # 2. Cyclical patterns (simulate intraday patterns)
-        cycle_period = 8  # 8-hour cycle
-        cycle_amplitude = current_price * 0.015  # 1.5% amplitude
-        cycles = cycle_amplitude * np.sin(2 * np.pi * np.arange(hours) / cycle_period)
-        
-        # 3. Micro-volatility with clustering (GARCH-like)
-        base_volatility = abs(price_change_24h) / 100 * 0.3 + 0.01
-        volatility = np.zeros(hours)
-        volatility[0] = base_volatility
-        for i in range(1, hours):
-            # Volatility clustering
-            volatility[i] = 0.7 * volatility[i-1] + 0.3 * base_volatility * (1 + np.random.exponential(0.5))
-        
-        noise = np.random.normal(0, 1, hours) * volatility * current_price
-        
-        # 4. Sudden spikes (pump/dump simulation)
-        spikes = np.zeros(hours)
-        spike_prob = 0.1 if abs(price_change_24h) > 20 else 0.05
-        for i in range(hours):
-            if np.random.random() < spike_prob:
-                spike_direction = 1 if price_change_24h > 0 else -1
-                spikes[i] = spike_direction * current_price * np.random.uniform(0.01, 0.03)
-        
-        # Combine all components
-        prices = base_trend + cycles + noise + spikes
-        prices = np.maximum(prices, current_price * 0.3)  # Floor at 30%
-        prices = np.minimum(prices, current_price * 2.0)  # Cap at 200%
-        
-        # Force last price to be close to current
-        prices[-1] = current_price
-        prices[-2] = current_price * np.random.uniform(0.98, 1.02)
-        
-        # === V2: Realistic OHLC generation ===
-        opens = np.zeros(hours)
-        highs = np.zeros(hours)
-        lows = np.zeros(hours)
-        closes = prices.copy()
-        
-        opens[0] = start_price
-        for i in range(1, hours):
-            opens[i] = closes[i-1]  # Open = previous close
-        
-        # High/Low with volume-correlated range
-        for i in range(hours):
-            candle_range = abs(closes[i] - opens[i]) * np.random.uniform(1.0, 1.5)
-            highs[i] = max(opens[i], closes[i]) + candle_range * np.random.uniform(0.2, 0.5)
-            lows[i] = min(opens[i], closes[i]) - candle_range * np.random.uniform(0.2, 0.5)
-            lows[i] = max(lows[i], current_price * 0.2)  # Floor
-        
-        # === V2: Volume with price correlation ===
-        avg_volume_per_hour = volume_24h / 24
-        
-        # Volume correlates with price change
-        price_changes = np.abs(np.diff(prices, prepend=prices[0])) / prices * 100
-        volume_multiplier = 1 + price_changes * 0.1  # More volume on bigger moves
-        
-        base_volumes = np.random.exponential(avg_volume_per_hour, hours)
-        volumes = base_volumes * volume_multiplier
-        
-        # Recent hours have more volume (approaching now)
-        recency_factor = np.linspace(0.5, 1.5, hours)
-        volumes = volumes * recency_factor
-        
-        # Create DataFrame
-        df = pd.DataFrame({
-            "timestamp": timestamps,
-            "open": opens,
-            "high": highs,
-            "low": lows,
-            "close": closes,
-            "volume": volumes
-        })
-        
-        return df
+
+    def _map_chain_to_gecko(self, chain_id: str) -> str:
+        """Map DexScreener chain IDs to GeckoTerminal network IDs"""
+        mapping = {
+            "solana": "solana",
+            "ethereum": "eth",
+            "bsc": "bsc",
+            "polygon": "polygon_pos",
+            "arbitrum": "arbitrum",
+            "optimism": "optimism",
+            "avalanche": "avax",
+            "base": "base",
+            "fantom": "ftm",
+            "cronos": "cronos"
+        }
+        return mapping.get(chain_id.lower(), chain_id.lower())
+
+    # Legacy synthetic method removed/not used anymore
     
     def get_token_info(self, token_address: str, chain_id: str = "solana") -> Optional[Dict]:
         """Mendapatkan informasi detail token"""

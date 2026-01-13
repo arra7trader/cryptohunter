@@ -8,24 +8,24 @@
 <p align="center">
   <img src="https://img.shields.io/badge/AI-Powered-cyan?style=for-the-badge" />
   <img src="https://img.shields.io/badge/Real--Time-Scanning-green?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/DexScreener-API-orange?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/GeckoTerminal-API-orange?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Phantom-Wallet-purple?style=for-the-badge" />
 </p>
 
 ## 🎯 Overview
 
-**CryptoHunter AI** adalah platform canggih untuk memantau dan memprediksi token cryptocurrency secara real-time. Menggunakan kombinasi **Machine Learning (LSTM, Transformer)** dan **Social Network Analysis (SNA)** untuk mendeteksi potensi pump pada token-token baru di DEX (Decentralized Exchange).
+**CryptoHunter AI** adalah platform canggih untuk memantau dan memprediksi token cryptocurrency secara real-time. Versi 3.0 kini dilengkapi dengan **Deep Historical Data (GeckoTerminal)**, **Anti-Rugpull System (RugCheck)**, dan **Wallet Integration (Phantom)**.
 
-### ✨ Key Features
+### ✨ Key Features (v3.0.0)
 
 | Feature | Description |
 |---------|-------------|
-| 🔍 **Live Scanner** | Pemantauan real-time token dari DexScreener API |
-| 🤖 **AI Prediction** | Super-Ensemble model (LSTM + Transformer + Conv1D) |
-| 📊 **SNA Analysis** | Drone Emprit-style volume spike detection |
-| ⭐ **Watchlist** | Track dan monitor token favorit |
-| 📈 **Trending** | Hot tokens, top gainers, dan AI picks |
-| 🔔 **Alerts** | Price alert system |
-| 🌐 **Multi-Chain** | Support Solana, Ethereum, BSC, Polygon, dll |
+| 🔍 **Alpha Scanner V3** | Auto-scan pair baru dengan filter **Rugpull/Honeypot** otomatis |
+| 🕯️ **Real Deep Data** | Data candle OHLCV ASLI dari GeckoTerminal (Anti-Synthetic data) |
+| 🛡️ **Security Check** | Integrasi RugCheck.xyz untuk skor keamanan token (Solana) |
+| 👻 **Wallet Connect** | Hubungkan Phantom/Solflare untuk persiapan trading |
+| 🧠 **Enhanced AI** | Prediksi disesuaikan dengan **Fear & Greed Index** & Global Volume |
+| 📊 **SNA Analysis** | Mendeteksi akumulasi Whale & Buy Pressure secara on-chain |
 
 ---
 

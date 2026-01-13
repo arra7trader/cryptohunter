@@ -59,11 +59,15 @@ class SNAResult:
     whale_indicator: float
     # V3 Alpha metrics
     alpha_rating: AlphaRating
-    buy_pressure: float  # 0-100, higher = more buyers
-    volume_acceleration: float  # Rate of volume increase
-    token_age_hours: float  # Age in hours
-    liquidity_ratio: float  # Liq vs MCap ratio
-    alpha_score: float  # Final alpha hunting score
+    buy_pressure: float
+    volume_acceleration: float
+    token_age_hours: float
+    liquidity_ratio: float
+    alpha_score: float
+    # Security metrics
+    is_safe: bool = True
+    safety_score: int = 100
+    security_risks: List[str] = None
 
 
 class SNAAnalyzer:
@@ -87,8 +91,15 @@ class SNAAnalyzer:
     
     def __init__(self):
         self.analyzed_tokens: List[SNAResult] = []
+        try:
+            from modules.rugcheck import RugChecker
+            self.security_scanner = RugChecker()
+            print(f"{Fore.CYAN}[SNA-V3] Security Scanner initialized{Style.RESET_ALL}")
+        except ImportError:
+            self.security_scanner = None
+            print(f"{Fore.YELLOW}[WARN] RugCheck module not found, skipping security checks{Style.RESET_ALL}")
     
-    def analyze_token(self, token_data: Dict) -> SNAResult:
+    def analyze_token(self, token_data: Dict, check_security: bool = False) -> SNAResult:
         # Extract volumes
         volume_5m = float(token_data.get("volume_5m", 0))
         volume_1h = float(token_data.get("volume_1h", 0))
@@ -193,6 +204,28 @@ class SNAAnalyzer:
             tx_velocity=tx_velocity
         )
         
+        # Security Check (Optional based on flag or score)
+        is_safe = True
+        safety_score = 100
+        security_risks = []
+        
+        # Only run RugCheck if it looks like a pump to save API calls, or if explicitly requested
+        if (is_pump or check_security) and self.security_scanner:
+            address = token_data.get("base_token_address", "")
+            chain = token_data.get("chain_id", "solana")
+            # Only support Solana check for now in logic
+            if chain.lower() == "solana" and address:
+                 sec_res = self.security_scanner.check_token(address, chain)
+                 is_safe = sec_res['is_safe']
+                 safety_score = sec_res['safety_score']
+                 security_risks = sec_res['risks']
+                 
+                 # If unsafe, downgrade alpha score/rating drastically
+                 if not is_safe:
+                     alpha_score = 0
+                     alpha_rating = AlphaRating.D_TIER
+                     is_pump = False
+        
         return SNAResult(
             token_symbol=token_data.get("base_token", "UNKNOWN"),
             token_address=token_data.get("base_token_address", ""),
@@ -214,7 +247,11 @@ class SNAAnalyzer:
             volume_acceleration=volume_acceleration,
             token_age_hours=token_age_hours,
             liquidity_ratio=liquidity_ratio,
-            alpha_score=alpha_score
+            alpha_score=alpha_score,
+            # Security
+            is_safe=is_safe,
+            safety_score=safety_score,
+            security_risks=security_risks or []
         )
     
     def _calc_token_age(self, pair_created_at) -> float:

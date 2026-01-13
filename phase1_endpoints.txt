@@ -1,0 +1,67 @@
+# === ENHANCED PREDICTION ENDPOINT ===
+
+@app.get("/api/predict/enhanced/{symbol}")
+async def get_enhanced_prediction_endpoint(symbol: str):
+    """
+    🔮 Enhanced Prediction
+    
+    Combines:
+    - AI Models (LSTM/Prophet/Transformer)
+    - Binance Market Data (Volume, Price Action)
+    - Fear & Greed Index Sentiment
+    """
+    try:
+        result = enhanced_predictor.predict(symbol)
+        if not result:
+            return {"error": f"Could not generate prediction for {symbol}"}
+        return result.to_dict()
+    except Exception as e:
+        print(f"[API] Enhanced prediction error: {e}")
+        return {"error": str(e)}
+
+
+# === MARKET SENTIMENT ENDPOINTS ===
+
+@app.get("/api/market/sentiment")
+async def get_market_sentiment():
+    """
+    🧠 Market Sentiment (Fear & Greed)
+    """
+    try:
+        return fear_greed_api.get_current()
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/api/market/sentiment/history")
+async def get_sentiment_history(days: int = 30):
+    """
+    📜 Sentiment History
+    """
+    try:
+        df = fear_greed_api.get_historical(days)
+        if df.empty:
+            return []
+        records = df.to_dict(orient='records')
+        for r in records:
+            if isinstance(r['timestamp'], datetime):
+                r['timestamp'] = r['timestamp'].isoformat()
+        return records
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# === GLOBAL MARKET DATA (BINANCE) ===
+
+@app.get("/api/market/global/{symbol}")
+async def get_global_market_data(symbol: str):
+    """
+    🌍 Global Market Data (Binance)
+    """
+    try:
+        ticker = binance_api.get_ticker(symbol)
+        if not ticker:
+            return {"error": "Symbol not found on Binance"}
+        return ticker
+    except Exception as e:
+        return {"error": str(e)}
+

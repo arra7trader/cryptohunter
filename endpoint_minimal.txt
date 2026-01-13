@@ -1,0 +1,27 @@
+
+# === PROPHET FORECASTING ENDPOINT ===
+
+@app.get("/api/forecast/prophet/{symbol}")
+async def forecast_prophet_simple(symbol: str):
+    """Prophet Forecast - 100% Free"""
+    try:
+        from modules.crypto_data_aggregator import get_aggregated_data
+        
+        if symbol.upper() not in ['BTC', 'ETH', 'SOL', 'DOGE', 'ADA', 'MATIC', 'LINK']:
+            return {"error": f"Symbol not supported: {symbol}"}
+            
+        aggregated = get_aggregated_data(symbol, interval='1h')
+        
+        if not aggregated or aggregated.total_candles < 50:
+            return {"error": f"Insufficient data for {symbol}"}
+        
+        result = unified_forecaster.forecast_with_prophet(aggregated.ohlcv)
+        
+        if not result:
+            return {"error": "Prophet not available"}
+        
+        return unified_forecaster._result_to_dict(result)
+        
+    except Exception as e:
+        print(f"[API] Prophet error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
